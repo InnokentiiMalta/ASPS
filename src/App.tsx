@@ -432,12 +432,6 @@ function App() {
             <span className="bg-red-50 text-red-700 px-3 py-1.5 rounded-full text-xs font-medium">
               📝 {TOTAL_QUESTIONS} вопросов
             </span>
-            <span className="bg-orange-50 text-orange-700 px-3 py-1.5 rounded-full text-xs font-medium">
-              🧮 {CALC_QUESTIONS_COUNT} вычислений
-            </span>
-            <span className="bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-full text-xs font-medium">
-              🖱️ {INTERACTIVE_QUESTIONS_COUNT} графических
-            </span>
             <span className="bg-amber-50 text-amber-700 px-3 py-1.5 rounded-full text-xs font-medium">
               ⏱ 2 мин/вопрос
             </span>
