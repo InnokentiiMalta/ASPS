@@ -1,4 +1,14 @@
-export type QuestionType = 'single' | 'multiple' | 'fill' | 'exclude';
+export type QuestionType = 'single' | 'multiple' | 'fill' | 'exclude' | 'interactive';
+
+export interface InteractiveZone {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label?: string;
+  correct?: boolean;
+}
 
 export interface Question {
   id: number;
@@ -6,11 +16,16 @@ export interface Question {
   text: string;
   hint?: string;
   options?: string[];
-  correctAnswer: string | string[];
+  correctAnswer?: string | string[];
   explanation: string;
   reference?: string;
   referenceUrl?: string;
   points: number;
+  // Для интерактивных задач
+  interactiveType?: 'place-detectors' | 'identify-elements' | 'connect-sheme';
+  zones?: InteractiveZone[];
+  correctZones?: string[];
+  svgContent?: string;
 }
 
 // ===== ОБЫЧНЫЕ ВОПРОСЫ =====
@@ -856,7 +871,68 @@ export const calculationQuestions: Question[] = [
   }
 ];
 
-export const totalPoints = [...regularQuestions, ...calculationQuestions].reduce((sum, q) => sum + q.points, 0);
+// ===== ИНТЕРАКТИВНЫЕ ГРАФИЧЕСКИЕ ЗАДАЧИ =====
+export const interactiveQuestions: Question[] = [
+  {
+    id: 201,
+    type: 'interactive',
+    interactiveType: 'place-detectors',
+    text: 'Разместите точечные дымовые извещатели на плане помещения. Помещение 12×8 м, высота 3 м. Один извещатель контролирует до 85 м². Кликните в места, где должны быть установлены извещатели.',
+    hint: 'Площадь помещения 96 м², необходимо минимум 2 извещателя. Расположите их равномерно.',
+    zones: [
+      { id: 'z1', x: 20, y: 20, width: 60, height: 60, correct: true },
+      { id: 'z2', x: 120, y: 20, width: 60, height: 60, correct: false },
+      { id: 'z3', x: 220, y: 20, width: 60, height: 60, correct: true },
+      { id: 'z4', x: 20, y: 120, width: 60, height: 60, correct: false },
+      { id: 'z5', x: 120, y: 120, width: 60, height: 60, correct: false },
+      { id: 'z6', x: 220, y: 120, width: 60, height: 60, correct: false },
+    ],
+    correctZones: ['z1', 'z3'],
+    explanation: 'Площадь помещения 12×8 = 96 м². При высоте 3 м один извещатель контролирует до 85 м². Необходимо минимум 2 извещателя. Оптимальное расположение — равномерно по площади помещения (в зонах z1 и z3).',
+    reference: 'СП 484.1311500.2020, Таблица 6.1',
+    referenceUrl: 'https://www.consultant.ru/document/cons_doc_LAW_376143/',
+    points: 4
+  },
+  {
+    id: 202,
+    type: 'interactive',
+    interactiveType: 'identify-elements',
+    text: 'На схеме системы пожарной сигнализации определите приёмно-контрольный прибор (ПКП). Кликните на правильный элемент.',
+    hint: 'ПКП — центральный элемент системы, к которому подключаются все шлейфы.',
+    zones: [
+      { id: 'e1', x: 150, y: 30, width: 100, height: 60, label: 'ПКП', correct: true },
+      { id: 'e2', x: 30, y: 130, width: 70, height: 50, label: 'ИПД', correct: false },
+      { id: 'e3', x: 130, y: 130, width: 70, height: 50, label: 'ИПТ', correct: false },
+      { id: 'e4', x: 230, y: 130, width: 70, height: 50, label: 'Оповещатель', correct: false },
+      { id: 'e5', x: 30, y: 210, width: 70, height: 50, label: 'ИПР', correct: false },
+    ],
+    correctZones: ['e1'],
+    explanation: 'Приёмно-контрольный прибор (ПКП) — центральный элемент системы пожарной сигнализации. К нему подключаются все шлейфы пожарной сигнализации с извещателями. ПКП принимает сигналы, обрабатывает их и формирует команды управления.',
+    reference: 'ГОСТ Р 53325-2012',
+    referenceUrl: 'https://www.consultant.ru/cons/cgi/online.cgi?req=doc&base=STR&n=17764',
+    points: 3
+  },
+  {
+    id: 203,
+    type: 'interactive',
+    interactiveType: 'connect-sheme',
+    text: 'Выберите правильную схему подключения адресных извещателей к адресному шлейфу пожарной сигнализации.',
+    hint: 'В адресном шлейфе все извещатели подключаются параллельно к одной паре проводов.',
+    zones: [
+      { id: 's1', x: 20, y: 20, width: 140, height: 100, label: 'Схема 1: Последовательная', correct: false },
+      { id: 's2', x: 170, y: 20, width: 140, height: 100, label: 'Схема 2: Параллельная', correct: true },
+      { id: 's3', x: 20, y: 140, width: 140, height: 100, label: 'Схема 3: Звезда', correct: false },
+      { id: 's4', x: 170, y: 140, width: 140, height: 100, label: 'Схема 4: Кольцевая', correct: false },
+    ],
+    correctZones: ['s2'],
+    explanation: 'В адресных системах пожарной сигнализации извещатели подключаются параллельно к одной паре проводов адресного шлейфа. Каждый извещатель имеет уникальный адрес и обменивается данными с ПКП по этой шине. Параллельная схема обеспечивает надёжность и простоту монтажа.',
+    reference: 'СП 484.1311500.2020, Раздел 5',
+    referenceUrl: 'https://www.consultant.ru/document/cons_doc_LAW_376143/',
+    points: 4
+  }
+];
+
+export const totalPoints = [...regularQuestions, ...calculationQuestions, ...interactiveQuestions].reduce((sum, q) => sum + q.points, 0);
 
 // Функция для перемешивания массива (алгоритм Фишера-Йетса)
 export function shuffleArray<T>(array: T[]): T[] {

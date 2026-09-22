@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import QRCode from 'react-qr-code';
-import { regularQuestions, calculationQuestions, Question, shuffleArray } from './data/questions';
+import { regularQuestions, calculationQuestions, interactiveQuestions, Question, shuffleArray } from './data/questions';
 
 type Screen = 'home' | 'quiz' | 'result' | 'review';
 
 const QUESTION_TIME_LIMIT = 120; // 2 минуты
 const TOTAL_QUESTIONS = 25;
 const CALC_QUESTIONS_COUNT = 5; // Каждый 5-й — вычислительный
-const REGULAR_QUESTIONS_COUNT = TOTAL_QUESTIONS - CALC_QUESTIONS_COUNT; // 20
+const INTERACTIVE_QUESTIONS_COUNT = 2; // 2 интерактивные задачи
+const REGULAR_QUESTIONS_COUNT = TOTAL_QUESTIONS - CALC_QUESTIONS_COUNT - INTERACTIVE_QUESTIONS_COUNT; // 18
 
 function App() {
   const [screen, setScreen] = useState<Screen>('home');
@@ -22,6 +23,7 @@ function App() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [timeLeft, setTimeLeft] = useState(QUESTION_TIME_LIMIT);
   const [timerActive, setTimerActive] = useState(false);
+  const [selectedZones, setSelectedZones] = useState<Record<number, string[]>>({});
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const currentUrl = window.location.origin + window.location.pathname;
@@ -59,6 +61,14 @@ function App() {
   };
 
   const isCorrect = useCallback((q: Question): boolean => {
+    // Для интерактивных вопросов
+    if (q.type === 'interactive' && q.correctZones) {
+      const userZones = selectedZones[q.id] || [];
+      if (userZones.length === 0) return false;
+      return q.correctZones.length === userZones.length && 
+        q.correctZones.every(z => userZones.includes(z));
+    }
+
     const userAnswer = answers[q.id];
     if (!userAnswer) return false;
 
@@ -77,7 +87,7 @@ function App() {
     }
     
     return false;
-  }, [answers]);
+  }, [answers, selectedZones]);
 
   const calculateScore = () => {
     let total = 0;
@@ -122,22 +132,50 @@ function App() {
     }
   };
 
+  const handleZoneClick = (zoneId: string) => {
+    const current = selectedZones[question.id] || [];
+    if (current.includes(zoneId)) {
+      setSelectedZones(prev => ({ ...prev, [question.id]: current.filter(z => z !== zoneId) }));
+    } else {
+      setSelectedZones(prev => ({ ...prev, [question.id]: [...current, zoneId] }));
+    }
+  };
+
+  const hasInteractiveAnswer = (): boolean => {
+    if (question.type !== 'interactive') return false;
+    const zones = selectedZones[question.id] || [];
+    return zones.length > 0;
+  };
+
   const startQuiz = () => {
-    // Выбираем 20 случайных обычных вопросов и 5 вычислительных
+    // Выбираем случайные вопросы из каждой категории
     const shuffledRegular = shuffleArray(regularQuestions).slice(0, REGULAR_QUESTIONS_COUNT);
     const shuffledCalc = shuffleArray(calculationQuestions).slice(0, CALC_QUESTIONS_COUNT);
+    const shuffledInteractive = shuffleArray(interactiveQuestions).slice(0, INTERACTIVE_QUESTIONS_COUNT);
     
-    // Формируем итоговый массив: каждый 5-й вопрос — вычислительный
+    // Формируем итоговый массив
     const finalQuestions: Question[] = [];
     let calcIndex = 0;
     let regularIndex = 0;
+    let interactiveIndex = 0;
     
     for (let i = 0; i < TOTAL_QUESTIONS; i++) {
+      // Каждый 5-й вопрос — вычислительный (позиции 5, 10, 15, 20, 25)
       if ((i + 1) % 5 === 0 && calcIndex < shuffledCalc.length) {
-        // Каждый 5-й вопрос — вычислительный (позиции 5, 10, 15, 20, 25)
         finalQuestions.push(shuffledCalc[calcIndex]);
         calcIndex++;
-      } else {
+      } 
+      // Вопросы 8 и 18 — интерактивные
+      else if ((i + 1) === 8 || (i + 1) === 18) {
+        if (interactiveIndex < shuffledInteractive.length) {
+          finalQuestions.push(shuffledInteractive[interactiveIndex]);
+          interactiveIndex++;
+        } else {
+          finalQuestions.push(shuffledRegular[regularIndex]);
+          regularIndex++;
+        }
+      }
+      else {
         finalQuestions.push(shuffledRegular[regularIndex]);
         regularIndex++;
       }
@@ -146,6 +184,7 @@ function App() {
     setTestQuestions(finalQuestions);
     setCurrentQuestion(0);
     setAnswers({});
+    setSelectedZones({});
     setScore(0);
     setShowExplanation(false);
     setTimeLeft(QUESTION_TIME_LIMIT);
@@ -157,6 +196,7 @@ function App() {
     setScreen('home');
     setCurrentQuestion(0);
     setAnswers({});
+    setSelectedZones({});
     setScore(0);
     setShowExplanation(false);
     setUserName('');
@@ -234,10 +274,15 @@ function App() {
       const correct = isCorrect(q);
       const userAnswer = answers[q.id];
       const isCalc = calculationQuestions.some(cq => cq.id === q.id);
+      const isInteractive = q.type === 'interactive';
       
-      report += `${idx + 1}. [${correct ? '✓' : '✗'}] ${isCalc ? '[ВЫЧИСЛЕНИЕ] ' : ''}${q.text}\n`;
+      report += `${idx + 1}. [${correct ? '✓' : '✗'}] ${isCalc ? '[ВЫЧИСЛЕНИЕ] ' : ''}${isInteractive ? '[ГРАФИЧЕСКАЯ] ' : ''}${q.text}\n`;
       
-      if (q.type === 'multiple') {
+      if (isInteractive && q.correctZones) {
+        const userZones = selectedZones[q.id] || [];
+        report += `   Выбрано зон: ${userZones.length > 0 ? userZones.join(', ') : '—'}\n`;
+        report += `   Правильные зоны: ${q.correctZones.join(', ')}\n`;
+      } else if (q.type === 'multiple') {
         const userArr = Array.isArray(userAnswer) ? userAnswer : [];
         report += `   Ваш ответ: ${userArr.length > 0 ? userArr.join('; ') : '—'}\n`;
         report += `   Правильный: ${(q.correctAnswer as string[]).join('; ')}\n`;
@@ -334,6 +379,9 @@ function App() {
             <span className="bg-orange-50 text-orange-700 px-3 py-1.5 rounded-full text-xs font-medium">
               🧮 {CALC_QUESTIONS_COUNT} вычислений
             </span>
+            <span className="bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-full text-xs font-medium">
+              🖱️ {INTERACTIVE_QUESTIONS_COUNT} графических
+            </span>
             <span className="bg-amber-50 text-amber-700 px-3 py-1.5 rounded-full text-xs font-medium">
               ⏱ 2 мин/вопрос
             </span>
@@ -377,9 +425,10 @@ function App() {
             <div className="bg-gray-50 rounded-xl p-4 text-left text-sm text-gray-600 space-y-2">
               <p className="font-semibold text-gray-700">📋 Правила теста:</p>
               <ul className="space-y-1 text-xs">
-                <li>• {TOTAL_QUESTIONS} вопросов из базы {regularQuestions.length + calculationQuestions.length} (каждый раз по-новому)</li>
+                <li>• {TOTAL_QUESTIONS} вопросов из базы {regularQuestions.length + calculationQuestions.length + interactiveQuestions.length} (каждый раз по-новому)</li>
                 <li>• На каждый вопрос — 2 минуты</li>
                 <li>• Каждый 5-й вопрос — на вычисления</li>
+                <li>• {INTERACTIVE_QUESTIONS_COUNT} интерактивные графические задачи</li>
                 <li>• Вопросы с одним ответом, множественным выбором, вводом текста и исключением</li>
                 <li>• После ответа — объяснение со ссылкой на нормативный документ</li>
                 <li>• По завершении можно экспортировать результаты в TXT</li>
@@ -420,6 +469,7 @@ function App() {
   const getTypeLabel = (q: Question) => {
     const isCalc = calculationQuestions.some(cq => cq.id === q.id);
     if (isCalc) return { label: '🧮 Вычисление', className: 'bg-amber-50 text-amber-700' };
+    if (q.type === 'interactive') return { label: '🖱️ Графическая задача', className: 'bg-indigo-50 text-indigo-700' };
     switch (q.type) {
       case 'single': return { label: '🔘 Один ответ', className: 'bg-blue-50 text-blue-700' };
       case 'multiple': return { label: '☑️ Несколько ответов', className: 'bg-purple-50 text-purple-700' };
@@ -504,6 +554,130 @@ function App() {
                 )}
               </div>
             </div>
+
+            {/* Interactive Graphics */}
+            {question.type === 'interactive' && question.zones && (
+              <div className="mt-4">
+                <div className="bg-gray-50 rounded-xl p-4 border-2 border-indigo-200">
+                  <svg viewBox="0 0 320 280" className="w-full h-auto" style={{ maxHeight: '300px' }}>
+                    {/* Фон */}
+                    <rect x="0" y="0" width="320" height="280" fill="#f9fafb" stroke="#d1d5db" strokeWidth="2" />
+                    
+                    {/* Зоны для клика */}
+                    {question.zones.map((zone) => {
+                      const isSelected = (selectedZones[question.id] || []).includes(zone.id);
+                      const isCorrectZone = zone.correct;
+                      
+                      let fillColor = '#e5e7eb';
+                      let strokeColor = '#9ca3af';
+                      
+                      if (showExplanation) {
+                        if (isSelected && isCorrectZone) {
+                          fillColor = '#86efac'; // зелёный
+                          strokeColor = '#16a34a';
+                        } else if (isSelected && !isCorrectZone) {
+                          fillColor = '#fca5a5'; // красный
+                          strokeColor = '#dc2626';
+                        } else if (!isSelected && isCorrectZone) {
+                          fillColor = '#bbf7d0'; // светло-зелёный
+                          strokeColor = '#22c55e';
+                        }
+                      } else if (isSelected) {
+                        fillColor = '#c7d2fe'; // индиго
+                        strokeColor = '#6366f1';
+                      }
+                      
+                      return (
+                        <g key={zone.id}>
+                          <rect
+                            x={zone.x}
+                            y={zone.y}
+                            width={zone.width}
+                            height={zone.height}
+                            fill={fillColor}
+                            stroke={strokeColor}
+                            strokeWidth="2"
+                            rx="4"
+                            className={!showExplanation ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}
+                            onClick={() => !showExplanation && handleZoneClick(zone.id)}
+                          />
+                          {zone.label && (
+                            <text
+                              x={zone.x + zone.width / 2}
+                              y={zone.y + zone.height / 2}
+                              textAnchor="middle"
+                              dominantBaseline="middle"
+                              fontSize="10"
+                              fill="#374151"
+                              className="pointer-events-none"
+                            >
+                              {zone.label}
+                            </text>
+                          )}
+                          {isSelected && (
+                            <text
+                              x={zone.x + zone.width / 2}
+                              y={zone.y + zone.height / 2 + (zone.label ? 12 : 0)}
+                              textAnchor="middle"
+                              dominantBaseline="middle"
+                              fontSize="16"
+                              className="pointer-events-none"
+                            >
+                              {showExplanation ? (isCorrectZone ? '✓' : '✗') : '✓'}
+                            </text>
+                          )}
+                        </g>
+                      );
+                    })}
+                    
+                    {/* Специфичные элементы для разных типов задач */}
+                    {question.interactiveType === 'place-detectors' && (
+                      <>
+                        {/* План помещения */}
+                        <text x="160" y="15" textAnchor="middle" fontSize="11" fill="#6b7280">План помещения 12×8 м</text>
+                        <line x1="10" y1="25" x2="310" y2="25" stroke="#9ca3af" strokeWidth="1" strokeDasharray="4" />
+                        <line x1="10" y1="255" x2="310" y2="255" stroke="#9ca3af" strokeWidth="1" strokeDasharray="4" />
+                        <line x1="10" y1="25" x2="10" y2="255" stroke="#9ca3af" strokeWidth="1" strokeDasharray="4" />
+                        <line x1="310" y1="25" x2="310" y2="255" stroke="#9ca3af" strokeWidth="1" strokeDasharray="4" />
+                      </>
+                    )}
+                    
+                    {question.interactiveType === 'identify-elements' && (
+                      <>
+                        {/* Схема системы */}
+                        <text x="160" y="15" textAnchor="middle" fontSize="11" fill="#6b7280">Схема системы пожарной сигнализации</text>
+                        {/* Линии подключения */}
+                        <line x1="200" y1="90" x2="65" y2="130" stroke="#6366f1" strokeWidth="2" />
+                        <line x1="200" y1="90" x2="165" y2="130" stroke="#6366f1" strokeWidth="2" />
+                        <line x1="200" y1="90" x2="265" y2="130" stroke="#6366f1" strokeWidth="2" />
+                        <line x1="65" y1="180" x2="65" y2="210" stroke="#6366f1" strokeWidth="2" />
+                      </>
+                    )}
+                    
+                    {question.interactiveType === 'connect-sheme' && (
+                      <>
+                        <text x="160" y="15" textAnchor="middle" fontSize="11" fill="#6b7280">Схемы подключения извещателей</text>
+                      </>
+                    )}
+                  </svg>
+                  
+                  {/* Легенда */}
+                  {!showExplanation && (
+                    <div className="mt-3 text-xs text-gray-600 text-center">
+                      <p>Кликните на зоны для выбора. Выбрано: {(selectedZones[question.id] || []).length}</p>
+                    </div>
+                  )}
+                  
+                  {showExplanation && (
+                    <div className="mt-3 text-xs text-center space-y-1">
+                      <p className="text-green-600">✓ Правильные зоны</p>
+                      <p className="text-red-600">✗ Неправильный выбор</p>
+                      <p className="text-green-400">○ Пропущенные правильные зоны</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Answer Options */}
             <div className="space-y-2.5 mt-4">
@@ -654,11 +828,14 @@ function App() {
             {!showExplanation ? (
               <button
                 onClick={handleCheckAnswer}
-                disabled={!answers[question.id] || (
-                  question.type === 'fill' ? !(answers[question.id] as string)?.trim() :
-                  question.type === 'multiple' ? ((answers[question.id] as string[]) || []).length === 0 :
-                  false
-                )}
+                disabled={
+                  question.type === 'interactive' ? !hasInteractiveAnswer() :
+                  !answers[question.id] || (
+                    question.type === 'fill' ? !(answers[question.id] as string)?.trim() :
+                    question.type === 'multiple' ? ((answers[question.id] as string[]) || []).length === 0 :
+                    false
+                  )
+                }
                 className="flex-1 bg-red-600 text-white py-4 rounded-xl font-bold text-base hover:bg-red-700 transition-all disabled:bg-gray-300 disabled:cursor-not-allowed shadow-lg active:scale-95 transform"
               >
                 Проверить ответ ✓
@@ -806,10 +983,11 @@ function App() {
           {testQuestions.map((q, idx) => {
             const correct = isCorrect(q);
             const isCalc = calculationQuestions.some(cq => cq.id === q.id);
+            const isInteractive = q.type === 'interactive';
             return (
               <div key={q.id} className={`bg-white rounded-xl shadow-sm border-l-4 p-4 ${
                 correct ? 'border-green-500' : 'border-red-500'
-              } ${isCalc ? 'ring-1 ring-amber-200' : ''}`}>
+              } ${isCalc ? 'ring-1 ring-amber-200' : ''} ${isInteractive ? 'ring-1 ring-indigo-200' : ''}`}>
                 <div className="flex items-start gap-3">
                   <span className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white ${
                     correct ? 'bg-green-500' : 'bg-red-500'
@@ -817,7 +995,7 @@ function App() {
                     {correct ? '✓' : '✗'}
                   </span>
                   <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
                       <p className="text-sm font-medium text-gray-800">
                         {idx + 1}. {q.text}
                       </p>
@@ -826,19 +1004,43 @@ function App() {
                           🧮 Вычисление
                         </span>
                       )}
+                      {isInteractive && (
+                        <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">
+                          🖱️ Графическая
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs space-y-1">
-                      <p className="text-gray-500">
-                        Ваш ответ: <span className={correct ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
-                          {Array.isArray(answers[q.id]) ? (answers[q.id] as string[]).join(', ') : (answers[q.id] as string) || '—'}
-                        </span>
-                      </p>
-                      {!correct && (
-                        <p className="text-gray-500">
-                          Правильный ответ: <span className="text-green-600 font-medium">
-                            {Array.isArray(q.correctAnswer) ? (q.correctAnswer as string[]).join(', ') : q.correctAnswer as string}
-                          </span>
-                        </p>
+                      {q.type === 'interactive' && q.correctZones ? (
+                        <>
+                          <p className="text-gray-500">
+                            Выбрано зон: <span className={correct ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                              {(selectedZones[q.id] || []).length > 0 ? (selectedZones[q.id] || []).join(', ') : '—'}
+                            </span>
+                          </p>
+                          {!correct && (
+                            <p className="text-gray-500">
+                              Правильные зоны: <span className="text-green-600 font-medium">
+                                {q.correctZones.join(', ')}
+                              </span>
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-gray-500">
+                            Ваш ответ: <span className={correct ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                              {Array.isArray(answers[q.id]) ? (answers[q.id] as string[]).join(', ') : (answers[q.id] as string) || '—'}
+                            </span>
+                          </p>
+                          {!correct && (
+                            <p className="text-gray-500">
+                              Правильный ответ: <span className="text-green-600 font-medium">
+                                {Array.isArray(q.correctAnswer) ? (q.correctAnswer as string[]).join(', ') : q.correctAnswer as string}
+                              </span>
+                            </p>
+                          )}
+                        </>
                       )}
                     </div>
                     <p className="text-xs text-gray-500 mt-2 italic bg-gray-50 p-2 rounded-lg">
