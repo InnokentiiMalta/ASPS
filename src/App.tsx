@@ -1,11 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import QRCode from 'react-qr-code';
-import { questions, totalPoints, Question } from './data/questions';
+import { questions as allQuestions, totalPoints, Question, shuffleArray } from './data/questions';
 
 type Screen = 'home' | 'quiz' | 'result' | 'review';
 
+const QUESTION_TIME_LIMIT = 120; // 2 минуты в секундах
+
 function App() {
   const [screen, setScreen] = useState<Screen>('home');
+  const [shuffledQuestions, setShuffledQuestions] = useState<Question[]>([]);
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState<Record<number, string | string[]>>({});
   const [score, setScore] = useState(0);
@@ -14,9 +17,36 @@ function App() {
   const [nameEntered, setNameEntered] = useState(false);
   const [animateIn, setAnimateIn] = useState(true);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(QUESTION_TIME_LIMIT);
+  const [timerActive, setTimerActive] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const currentUrl = window.location.origin + window.location.pathname;
-  const question = questions[currentQuestion];
+  const question = shuffledQuestions[currentQuestion];
+
+  // Таймер
+  useEffect(() => {
+    if (timerActive && timeLeft > 0) {
+      timerRef.current = setInterval(() => {
+        setTimeLeft(prev => {
+          if (prev <= 1) {
+            // Время вышло — автоматически проверяем и переходим
+            if (timerRef.current) clearInterval(timerRef.current);
+            setTimerActive(false);
+            setTimeout(() => {
+              handleNext();
+            }, 500);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [timerActive, currentQuestion]);
 
   useEffect(() => {
     setAnimateIn(true);
@@ -26,7 +56,7 @@ function App() {
     setAnswers(prev => ({ ...prev, [question.id]: answer }));
   };
 
-  const isCorrect = (q: Question): boolean => {
+  const isCorrect = useCallback((q: Question): boolean => {
     const userAnswer = answers[q.id];
     if (!userAnswer) return false;
 
@@ -45,11 +75,11 @@ function App() {
     }
     
     return false;
-  };
+  }, [answers]);
 
   const calculateScore = () => {
     let total = 0;
-    questions.forEach((q) => {
+    shuffledQuestions.forEach((q) => {
       if (isCorrect(q)) {
         total += q.points;
       }
@@ -59,16 +89,26 @@ function App() {
 
   const handleNext = () => {
     setShowExplanation(false);
+    setTimerActive(false);
+    if (timerRef.current) clearInterval(timerRef.current);
     setAnimateIn(false);
     setTimeout(() => {
-      if (currentQuestion < questions.length - 1) {
+      if (currentQuestion < shuffledQuestions.length - 1) {
         setCurrentQuestion(prev => prev + 1);
+        setTimeLeft(QUESTION_TIME_LIMIT);
+        setTimerActive(true);
       } else {
         setScore(calculateScore());
         setScreen('result');
       }
       setAnimateIn(true);
     }, 150);
+  };
+
+  const handleCheckAnswer = () => {
+    setShowExplanation(true);
+    setTimerActive(false);
+    if (timerRef.current) clearInterval(timerRef.current);
   };
 
   const handleToggleMultiple = (option: string) => {
@@ -80,6 +120,18 @@ function App() {
     }
   };
 
+  const startQuiz = () => {
+    const shuffled = shuffleArray(allQuestions);
+    setShuffledQuestions(shuffled);
+    setCurrentQuestion(0);
+    setAnswers({});
+    setScore(0);
+    setShowExplanation(false);
+    setTimeLeft(QUESTION_TIME_LIMIT);
+    setTimerActive(true);
+    setScreen('quiz');
+  };
+
   const restartQuiz = () => {
     setScreen('home');
     setCurrentQuestion(0);
@@ -89,6 +141,9 @@ function App() {
     setUserName('');
     setNameEntered(false);
     setShowExportMenu(false);
+    setTimerActive(false);
+    setTimeLeft(QUESTION_TIME_LIMIT);
+    if (timerRef.current) clearInterval(timerRef.current);
   };
 
   const getGrade = () => {
@@ -100,7 +155,25 @@ function App() {
   };
 
   const getCorrectCount = () => {
-    return questions.filter(q => isCorrect(q)).length;
+    return shuffledQuestions.filter(q => isCorrect(q)).length;
+  };
+
+  const formatTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const getTimerColor = (): string => {
+    if (timeLeft > 60) return 'text-green-600';
+    if (timeLeft > 30) return 'text-yellow-600';
+    return 'text-red-600';
+  };
+
+  const getTimerBgColor = (): string => {
+    if (timeLeft > 60) return 'from-green-500 to-green-400';
+    if (timeLeft > 30) return 'from-yellow-500 to-yellow-400';
+    return 'from-red-500 to-red-400';
   };
 
   const generateTxtReport = (): string => {
@@ -123,14 +196,14 @@ function App() {
   Оценка: ${grade.grade}
   Баллы: ${score} / ${totalPoints}
   Процент: ${percentage}%
-  Правильных ответов: ${getCorrectCount()} из ${questions.length}
+  Правильных ответов: ${getCorrectCount()} из ${shuffledQuestions.length}
 ───────────────────────────────────────────
 
 ДЕТАЛИЗАЦИЯ ОТВЕТОВ:
 
 `;
 
-    questions.forEach((q, idx) => {
+    shuffledQuestions.forEach((q, idx) => {
       const correct = isCorrect(q);
       const userAnswer = answers[q.id];
       
@@ -165,7 +238,6 @@ function App() {
     const report = generateTxtReport();
     const fileName = `АСПС_тест_${userName.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.txt`;
 
-    // Try Web Share API first (mobile)
     if (navigator.share && navigator.canShare) {
       const file = new File([report], fileName, { type: 'text/plain;charset=utf-8' });
       const shareData = {
@@ -181,11 +253,10 @@ function App() {
           return;
         }
       } catch (err) {
-        // User cancelled or share failed, fall through to download
+        // fall through to download
       }
     }
 
-    // Fallback: download file
     const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -204,7 +275,6 @@ function App() {
       await navigator.clipboard.writeText(report);
       alert('Результаты скопированы в буфер обмена!');
     } catch {
-      // Fallback for older browsers
       const textarea = document.createElement('textarea');
       textarea.value = report;
       document.body.appendChild(textarea);
@@ -231,13 +301,13 @@ function App() {
           </p>
           <div className="flex items-center justify-center gap-2 flex-wrap">
             <span className="bg-red-50 text-red-700 px-3 py-1.5 rounded-full text-xs font-medium">
-              📝 {questions.length} вопросов
+              📝 {allQuestions.length} вопросов
             </span>
             <span className="bg-orange-50 text-orange-700 px-3 py-1.5 rounded-full text-xs font-medium">
               ⭐ {totalPoints} баллов
             </span>
             <span className="bg-amber-50 text-amber-700 px-3 py-1.5 rounded-full text-xs font-medium">
-              ⏱ ~20 мин
+              ⏱ 2 мин/вопрос
             </span>
           </div>
         </div>
@@ -279,15 +349,16 @@ function App() {
             <div className="bg-gray-50 rounded-xl p-4 text-left text-sm text-gray-600 space-y-2">
               <p className="font-semibold text-gray-700">📋 Правила теста:</p>
               <ul className="space-y-1 text-xs">
+                <li>• {allQuestions.length} вопросов в случайном порядке</li>
+                <li>• На каждый вопрос — 2 минуты</li>
                 <li>• Вопросы с одним ответом, множественным выбором, вводом текста и исключением</li>
-                <li>• Каждый вопрос имеет разную стоимость в баллах</li>
-                <li>• После ответа вы увидите объяснение со ссылкой на нормативный документ</li>
+                <li>• После ответа — объяснение со ссылкой на нормативный документ</li>
                 <li>• По завершении можно экспортировать результаты в TXT</li>
               </ul>
             </div>
 
             <button
-              onClick={() => setScreen('quiz')}
+              onClick={startQuiz}
               className="w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-red-700 transition-all transform hover:scale-[1.02] active:scale-95 shadow-lg"
             >
               🚀 Начать тест
@@ -328,8 +399,11 @@ function App() {
   };
 
   const renderQuestion = () => {
-    const progress = ((currentQuestion + 1) / questions.length) * 100;
+    if (!question) return null;
+    
+    const progress = ((currentQuestion + 1) / shuffledQuestions.length) * 100;
     const typeInfo = getTypeLabel(question.type);
+    const timerProgress = (timeLeft / QUESTION_TIME_LIMIT) * 100;
     
     return (
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 flex flex-col">
@@ -338,7 +412,7 @@ function App() {
           <div className="max-w-2xl mx-auto px-4 py-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium text-gray-500">
-                Вопрос {currentQuestion + 1}/{questions.length}
+                Вопрос {currentQuestion + 1}/{shuffledQuestions.length}
               </span>
               <div className="flex items-center gap-2">
                 <span className="text-xs bg-red-50 text-red-600 px-2 py-1 rounded-full font-medium">
@@ -346,9 +420,29 @@ function App() {
                 </span>
               </div>
             </div>
-            <div className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
+            
+            {/* Timer */}
+            {!showExplanation && (
+              <div className="mb-2">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-gray-500">⏱ Осталось времени</span>
+                  <span className={`text-sm font-bold ${getTimerColor()} ${timeLeft <= 10 ? 'animate-pulse' : ''}`}>
+                    {formatTime(timeLeft)}
+                  </span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                  <div 
+                    className={`h-2 rounded-full bg-gradient-to-r ${getTimerBgColor()} transition-all duration-1000 ease-linear`}
+                    style={{ width: `${timerProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            
+            {/* Progress bar */}
+            <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
               <div 
-                className="bg-gradient-to-r from-red-500 to-orange-500 h-2.5 rounded-full transition-all duration-500 ease-out"
+                className="bg-gradient-to-r from-red-500 to-orange-500 h-1.5 rounded-full transition-all duration-500 ease-out"
                 style={{ width: `${progress}%` }}
               />
             </div>
@@ -472,7 +566,7 @@ function App() {
                     autoFocus
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && answers[question.id] && !showExplanation) {
-                        setShowExplanation(true);
+                        handleCheckAnswer();
                       }
                     }}
                   />
@@ -525,15 +619,7 @@ function App() {
           <div className="flex gap-3">
             {!showExplanation ? (
               <button
-                onClick={() => {
-                  if (answers[question.id] && (
-                    question.type === 'fill' ? (answers[question.id] as string).trim().length > 0 :
-                    question.type === 'multiple' ? ((answers[question.id] as string[]) || []).length > 0 :
-                    true
-                  )) {
-                    setShowExplanation(true);
-                  }
-                }}
+                onClick={handleCheckAnswer}
                 disabled={!answers[question.id] || (
                   question.type === 'fill' ? !(answers[question.id] as string)?.trim() :
                   question.type === 'multiple' ? ((answers[question.id] as string[]) || []).length === 0 :
@@ -548,7 +634,7 @@ function App() {
                 onClick={handleNext}
                 className="flex-1 bg-gradient-to-r from-red-600 to-orange-600 text-white py-4 rounded-xl font-bold text-base hover:from-red-700 hover:to-orange-700 transition-all shadow-lg active:scale-95 transform"
               >
-                {currentQuestion < questions.length - 1 ? 'Далее →' : 'Завершить тест 🏁'}
+                {currentQuestion < shuffledQuestions.length - 1 ? 'Далее →' : 'Завершить тест 🏁'}
               </button>
             )}
           </div>
@@ -602,7 +688,7 @@ function App() {
               <div className="text-xs text-gray-600 mt-0.5">Верных</div>
             </div>
             <div className="bg-red-50 rounded-xl p-3">
-              <div className="text-xl font-bold text-red-600">{questions.length - correctCount}</div>
+              <div className="text-xl font-bold text-red-600">{shuffledQuestions.length - correctCount}</div>
               <div className="text-xs text-gray-600 mt-0.5">Ошибок</div>
             </div>
             <div className="bg-blue-50 rounded-xl p-3">
@@ -682,7 +768,7 @@ function App() {
         </div>
 
         <div className="max-w-2xl mx-auto px-4 py-5 space-y-4">
-          {questions.map((q, idx) => {
+          {shuffledQuestions.map((q, idx) => {
             const correct = isCorrect(q);
             return (
               <div key={q.id} className={`bg-white rounded-xl shadow-sm border-l-4 p-4 ${
