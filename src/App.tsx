@@ -26,6 +26,9 @@ function App() {
   const [selectedZones, setSelectedZones] = useState<Record<number, string[]>>({});
   const [matchAnswers, setMatchAnswers] = useState<Record<number, Record<string, string>>>({});
   const [draggedItem, setDraggedItem] = useState<string | null>(null);
+  const [userGroup, setUserGroup] = useState('');
+  const [testStartTime, setTestStartTime] = useState<Date | null>(null);
+  const [testEndTime, setTestEndTime] = useState<Date | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const currentUrl = window.location.origin + window.location.pathname;
@@ -126,6 +129,8 @@ function App() {
         setTimeLeft(QUESTION_TIME_LIMIT);
         setTimerActive(true);
       } else {
+        // Сохраняем время окончания теста
+        setTestEndTime(new Date());
         setScore(calculateScore());
         setScreen('result');
       }
@@ -189,6 +194,9 @@ function App() {
   };
 
   const startQuiz = () => {
+    // Сохраняем время начала теста
+    setTestStartTime(new Date());
+    
     // Выбираем случайные вопросы из каждой категории
     const shuffledRegular = shuffleArray(regularQuestions).slice(0, REGULAR_QUESTIONS_COUNT);
     const shuffledCalc = shuffleArray(calculationQuestions).slice(0, CALC_QUESTIONS_COUNT);
@@ -243,10 +251,13 @@ function App() {
     setScore(0);
     setShowExplanation(false);
     setUserName('');
+    setUserGroup('');
     setNameEntered(false);
     setShowExportMenu(false);
     setTimerActive(false);
     setTimeLeft(QUESTION_TIME_LIMIT);
+    setTestStartTime(null);
+    setTestEndTime(null);
     if (timerRef.current) clearInterval(timerRef.current);
   };
 
@@ -290,6 +301,8 @@ function App() {
     const maxScore = getMaxScore();
     const percentage = Math.round((score / maxScore) * 100);
     const date = new Date().toLocaleString('ru-RU');
+    const startTimeStr = testStartTime ? testStartTime.toLocaleString('ru-RU') : '—';
+    const endTimeStr = testEndTime ? testEndTime.toLocaleString('ru-RU') : '—';
     
     let report = `═══════════════════════════════════════════
   РЕЗУЛЬТАТЫ ТЕСТИРОВАНИЯ
@@ -299,6 +312,9 @@ function App() {
 
 Дата: ${date}
 Тестируемый: ${userName}
+Группа: ${userGroup || '—'}
+Время начала теста: ${startTimeStr}
+Время окончания теста: ${endTimeStr}
 
 ───────────────────────────────────────────
   ИТОГОВЫЙ РЕЗУЛЬТАТ
@@ -363,39 +379,120 @@ function App() {
     return report;
   };
 
-  const handleExportTxt = async () => {
-    const report = generateTxtReport();
-    const fileName = `АСПС_тест_${userName.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.txt`;
-
-    if (navigator.share && navigator.canShare) {
-      const file = new File([report], fileName, { type: 'text/plain;charset=utf-8' });
-      const shareData = {
-        files: [file],
-        title: 'Результаты теста АСПС',
-        text: `Результаты тестирования по АСПС: ${userName} — ${score}/${getMaxScore()} баллов`
-      };
+  const generatePdfReport = async () => {
+    const html2pdf = (await import('html2pdf.js')).default;
+    
+    const grade = getGrade();
+    const maxScore = getMaxScore();
+    const percentage = Math.round((score / maxScore) * 100);
+    const startTimeStr = testStartTime ? testStartTime.toLocaleString('ru-RU') : '—';
+    const endTimeStr = testEndTime ? testEndTime.toLocaleString('ru-RU') : '—';
+    
+    // Создаем HTML для PDF
+    const element = document.createElement('div');
+    element.style.fontFamily = 'Arial, sans-serif';
+    element.style.padding = '20px';
+    element.style.fontSize = '12px';
+    
+    let html = `
+      <h1 style="text-align: center; color: #dc2626; margin-bottom: 10px;">РЕЗУЛЬТАТЫ ТЕСТИРОВАНИЯ</h1>
+      <h2 style="text-align: center; font-size: 14px; margin-bottom: 20px;">Автоматизированные системы противопожарной сигнализации (АСПС)</h2>
       
-      try {
-        if (navigator.canShare(shareData)) {
-          await navigator.share(shareData);
-          setShowExportMenu(false);
-          return;
+      <table style="width: 100%; margin-bottom: 20px; border-collapse: collapse;">
+        <tr>
+          <td style="padding: 5px; font-weight: bold;">Тестируемый:</td>
+          <td style="padding: 5px;">${userName}</td>
+        </tr>
+        <tr>
+          <td style="padding: 5px; font-weight: bold;">Группа:</td>
+          <td style="padding: 5px;">${userGroup || '—'}</td>
+        </tr>
+        <tr>
+          <td style="padding: 5px; font-weight: bold;">Время начала теста:</td>
+          <td style="padding: 5px;">${startTimeStr}</td>
+        </tr>
+        <tr>
+          <td style="padding: 5px; font-weight: bold;">Время окончания теста:</td>
+          <td style="padding: 5px;">${endTimeStr}</td>
+        </tr>
+      </table>
+      
+      <div style="background-color: #f3f4f6; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
+        <h3 style="margin-top: 0; color: #1f2937;">ИТОГОВЫЙ РЕЗУЛЬТАТ</h3>
+        <p style="margin: 5px 0;"><strong>Оценка:</strong> ${grade.grade}</p>
+        <p style="margin: 5px 0;"><strong>Баллы:</strong> ${score} / ${maxScore}</p>
+        <p style="margin: 5px 0;"><strong>Процент:</strong> ${percentage}%</p>
+        <p style="margin: 5px 0;"><strong>Правильных ответов:</strong> ${getCorrectCount()} из ${testQuestions.length}</p>
+      </div>
+      
+      <h3 style="color: #1f2937; margin-bottom: 10px;">ДЕТАЛИЗАЦИЯ ОТВЕТОВ</h3>
+    `;
+    
+    testQuestions.forEach((q, idx) => {
+      const correct = isCorrect(q);
+      const userAnswer = answers[q.id];
+      const isCalc = calculationQuestions.some(cq => cq.id === q.id);
+      const isInteractive = q.type === 'interactive';
+      
+      html += `
+        <div style="margin-bottom: 15px; padding: 10px; border-left: 3px solid ${correct ? '#10b981' : '#ef4444'}; background-color: #f9fafb;">
+          <p style="margin: 0 0 5px 0; font-weight: bold;">
+            ${idx + 1}. [${correct ? '✓' : '✗'}] ${isCalc ? '[ВЫЧИСЛЕНИЕ] ' : ''}${isInteractive ? '[ГРАФИЧЕСКАЯ] ' : ''}${q.text}
+          </p>
+      `;
+      
+      if (isInteractive && q.interactiveType === 'matching' && q.matchPairs) {
+        const userMatches = matchAnswers[q.id] || {};
+        html += `<p style="margin: 5px 0; font-size: 11px;"><strong>Установленные соответствия:</strong></p>`;
+        q.matchPairs.forEach(pair => {
+          const userAnswer = userMatches[pair.id];
+          html += `<p style="margin: 2px 0; font-size: 11px;">• ${pair.left} → ${userAnswer || '—'}</p>`;
+        });
+        if (!correct) {
+          html += `<p style="margin: 5px 0; font-size: 11px;"><strong>Правильные соответствия:</strong></p>`;
+          q.matchPairs.forEach(pair => {
+            html += `<p style="margin: 2px 0; font-size: 11px;">• ${pair.left} → ${pair.right}</p>`;
+          });
         }
-      } catch (err) {
-        // fall through to download
+      } else if (q.type === 'multiple') {
+        const userArr = Array.isArray(userAnswer) ? userAnswer : [];
+        html += `<p style="margin: 5px 0; font-size: 11px;"><strong>Ваш ответ:</strong> ${userArr.length > 0 ? userArr.join('; ') : '—'}</p>`;
+        html += `<p style="margin: 5px 0; font-size: 11px;"><strong>Правильный:</strong> ${(q.correctAnswer as string[]).join('; ')}</p>`;
+      } else {
+        html += `<p style="margin: 5px 0; font-size: 11px;"><strong>Ваш ответ:</strong> ${userAnswer || '—'}</p>`;
+        if (!correct) {
+          html += `<p style="margin: 5px 0; font-size: 11px;"><strong>Правильный:</strong> ${q.correctAnswer as string}</p>`;
+        }
       }
-    }
+      
+      html += `<p style="margin: 5px 0; font-size: 11px; font-style: italic; color: #6b7280;">${q.explanation}</p>`;
+      if (q.reference) {
+        html += `<p style="margin: 5px 0; font-size: 11px; color: #6b7280;"><strong>Источник:</strong> ${q.reference}</p>`;
+      }
+      html += `</div>`;
+    });
+    
+    element.innerHTML = html;
+    
+    const opt: any = {
+      margin: 10,
+      filename: `АСПС_тест_${userName.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+    
+    return html2pdf().from(element).set(opt).save();
+  };
 
-    const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    setShowExportMenu(false);
+  const handleExportTxt = async () => {
+    try {
+      await generatePdfReport();
+      setShowExportMenu(false);
+    } catch (err) {
+      console.error('Ошибка при генерации PDF:', err);
+      alert('Ошибка при генерации PDF файла');
+    }
   };
 
   const handleCopyToClipboard = async () => {
@@ -438,6 +535,26 @@ function App() {
           </div>
         </div>
 
+        {/* QR-код всегда отображается первым */}
+        <div className="mb-6 pb-6 border-b border-gray-200">
+          <p className="text-sm text-gray-500 mb-3">
+            📱 Сканируйте QR-код для прохождения с телефона:
+          </p>
+          <div className="inline-block p-4 bg-white rounded-xl shadow-md border border-gray-100">
+            <QRCode
+              value={currentUrl}
+              size={160}
+              level="M"
+            />
+          </div>
+          <div className="mt-3">
+            <p className="text-xs text-gray-400 mb-1">Или откройте ссылку на телефоне:</p>
+            <div className="bg-gray-50 rounded-lg p-2.5 text-xs text-gray-600 break-all font-mono select-all cursor-pointer hover:bg-gray-100 transition-colors">
+              {currentUrl}
+            </div>
+          </div>
+        </div>
+
         {!nameEntered ? (
           <div className="space-y-4">
             <div className="text-left">
@@ -457,6 +574,21 @@ function App() {
                 }}
                 autoFocus
               />
+              <label className="block text-sm font-medium text-gray-700 mb-2 mt-4">
+                🏫 Введите вашу группу:
+              </label>
+              <input
+                type="text"
+                value={userGroup}
+                onChange={(e) => setUserGroup(e.target.value)}
+                placeholder="Например: АПС-21-1"
+                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:outline-none transition-colors text-base"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && userName.trim()) {
+                    setNameEntered(true);
+                  }
+                }}
+              />
               <button
                 onClick={() => userName.trim() && setNameEntered(true)}
                 disabled={!userName.trim()}
@@ -470,6 +602,7 @@ function App() {
           <div className="space-y-4">
             <p className="text-gray-700 font-medium text-lg">
               Здравствуйте, <span className="text-red-600">{userName}</span>! 👋
+              {userGroup && <span className="text-gray-500 text-sm"> ({userGroup})</span>}
             </p>
             
             <div className="bg-gray-50 rounded-xl p-4 text-left text-sm text-gray-600 space-y-2">
@@ -481,7 +614,7 @@ function App() {
                 <li>• {INTERACTIVE_QUESTIONS_COUNT} интерактивные графические задачи</li>
                 <li>• Вопросы с одним ответом, множественным выбором, вводом текста и исключением</li>
                 <li>• После ответа — объяснение со ссылкой на нормативный документ</li>
-                <li>• По завершении можно экспортировать результаты в TXT</li>
+                <li>• По завершении можно экспортировать результаты в PDF</li>
               </ul>
             </div>
 
@@ -491,25 +624,6 @@ function App() {
             >
               🚀 Начать тест
             </button>
-            
-            <div className="mt-6 pt-6 border-t border-gray-200">
-              <p className="text-sm text-gray-500 mb-3">
-                📱 Сканируйте QR-код для прохождения с телефона:
-              </p>
-              <div className="inline-block p-4 bg-white rounded-xl shadow-md border border-gray-100">
-                <QRCode
-                  value={currentUrl}
-                  size={160}
-                  level="M"
-                />
-              </div>
-              <div className="mt-3">
-                <p className="text-xs text-gray-400 mb-1">Или откройте ссылку на телефоне:</p>
-                <div className="bg-gray-50 rounded-lg p-2.5 text-xs text-gray-600 break-all font-mono select-all cursor-pointer hover:bg-gray-100 transition-colors">
-                  {currentUrl}
-                </div>
-              </div>
-            </div>
           </div>
         )}
       </div>
@@ -1080,8 +1194,8 @@ function App() {
                 >
                   <span className="text-xl">📥</span>
                   <div>
-                    <p className="text-sm font-medium text-gray-800">Скачать TXT файл</p>
-                    <p className="text-xs text-gray-500">На телефоне — поделиться файлом</p>
+                    <p className="text-sm font-medium text-gray-800">Скачать PDF файл</p>
+                    <p className="text-xs text-gray-500">Результаты теста в формате PDF</p>
                   </div>
                 </button>
                 <button
@@ -1248,7 +1362,7 @@ function App() {
               onClick={handleExportTxt}
               className="w-full bg-indigo-50 text-indigo-700 py-3 rounded-xl font-semibold hover:bg-indigo-100 transition-all active:scale-95 transform flex items-center justify-center gap-2"
             >
-              <span>📥</span> Скачать результаты в TXT
+              <span>📥</span> Скачать результаты в PDF
             </button>
             <button
               onClick={handleCopyToClipboard}
