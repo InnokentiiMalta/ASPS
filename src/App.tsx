@@ -1,5 +1,581 @@
-export default function App() {
+import React, { useState, useEffect } from 'react';
+import QRCode from 'react-qr-code';
+import { questions, totalPoints, Question } from './data/questions';
+
+type Screen = 'home' | 'quiz' | 'result' | 'review';
+
+function App() {
+  const [screen, setScreen] = useState<Screen>('home');
+  const [currentQuestion, setCurrentQuestion] = useState(0);
+  const [answers, setAnswers] = useState<Record<number, string | string[]>>({});
+  const [score, setScore] = useState(0);
+  const [showExplanation, setShowExplanation] = useState(false);
+  const [userName, setUserName] = useState('');
+  const [nameEntered, setNameEntered] = useState(false);
+  const [animateIn, setAnimateIn] = useState(true);
+
+  const currentUrl = window.location.origin + window.location.pathname;
+  const question = questions[currentQuestion];
+
+  useEffect(() => {
+    setAnimateIn(true);
+  }, [screen, currentQuestion]);
+
+  const handleAnswer = (answer: string | string[]) => {
+    setAnswers(prev => ({ ...prev, [question.id]: answer }));
+  };
+
+  const isCorrect = (q: Question): boolean => {
+    const userAnswer = answers[q.id];
+    if (!userAnswer) return false;
+
+    if (q.type === 'single' || q.type === 'fill') {
+      const correct = q.correctAnswer as string;
+      return typeof userAnswer === 'string' && 
+        userAnswer.trim().toLowerCase() === correct.trim().toLowerCase();
+    }
+    
+    if (q.type === 'multiple') {
+      const correct = q.correctAnswer as string[];
+      const user = userAnswer as string[];
+      if (!Array.isArray(user)) return false;
+      return correct.length === user.length && 
+        correct.every(c => user.includes(c));
+    }
+    
+    return false;
+  };
+
+  const calculateScore = () => {
+    let total = 0;
+    questions.forEach((q) => {
+      if (isCorrect(q)) {
+        total += q.points;
+      }
+    });
+    return total;
+  };
+
+  const handleNext = () => {
+    setShowExplanation(false);
+    setAnimateIn(false);
+    setTimeout(() => {
+      if (currentQuestion < questions.length - 1) {
+        setCurrentQuestion(prev => prev + 1);
+      } else {
+        setScore(calculateScore());
+        setScreen('result');
+      }
+      setAnimateIn(true);
+    }, 150);
+  };
+
+  const handlePrev = () => {
+    if (currentQuestion > 0) {
+      setShowExplanation(false);
+      setAnimateIn(false);
+      setTimeout(() => {
+        setCurrentQuestion(prev => prev - 1);
+        setAnimateIn(true);
+      }, 150);
+    }
+  };
+
+  const handleToggleMultiple = (option: string) => {
+    const current = (answers[question.id] as string[]) || [];
+    if (current.includes(option)) {
+      handleAnswer(current.filter(o => o !== option));
+    } else {
+      handleAnswer([...current, option]);
+    }
+  };
+
+  const restartQuiz = () => {
+    setScreen('home');
+    setCurrentQuestion(0);
+    setAnswers({});
+    setScore(0);
+    setShowExplanation(false);
+    setUserName('');
+    setNameEntered(false);
+  };
+
+  const getGrade = () => {
+    const percentage = (score / totalPoints) * 100;
+    if (percentage >= 90) return { grade: 'Отлично', color: 'text-green-600', bg: 'bg-green-50', emoji: '🏆', desc: 'Превосходное знание материала!' };
+    if (percentage >= 75) return { grade: 'Хорошо', color: 'text-blue-600', bg: 'bg-blue-50', emoji: '⭐', desc: 'Хороший уровень подготовки.' };
+    if (percentage >= 60) return { grade: 'Удовлетворительно', color: 'text-yellow-600', bg: 'bg-yellow-50', emoji: '👍', desc: 'Базовые знания есть, но есть пробелы.' };
+    return { grade: 'Неудовлетворительно', color: 'text-red-600', bg: 'bg-red-50', emoji: '📚', desc: 'Рекомендуется повторить материал.' };
+  };
+
+  const getCorrectCount = () => {
+    return questions.filter(q => isCorrect(q)).length;
+  };
+
+  const renderHome = () => (
+    <div className="min-h-screen bg-gradient-to-br from-red-900 via-red-800 to-orange-900 flex items-center justify-center p-4">
+      <div className="max-w-lg w-full bg-white rounded-2xl shadow-2xl p-6 md:p-8 text-center animate-fade-in">
+        <div className="mb-6">
+          <div className="w-20 h-20 mx-auto bg-gradient-to-br from-red-500 to-orange-500 rounded-2xl flex items-center justify-center mb-4 shadow-lg">
+            <span className="text-4xl">🔥</span>
+          </div>
+          <h1 className="text-2xl md:text-3xl font-bold text-gray-800 mb-2">
+            Тест по АСПС
+          </h1>
+          <p className="text-sm md:text-base text-gray-500 mb-4">
+            Автоматизированные системы противопожарной сигнализации
+          </p>
+          <div className="flex items-center justify-center gap-2 flex-wrap">
+            <span className="bg-red-50 text-red-700 px-3 py-1.5 rounded-full text-xs font-medium">
+              📝 {questions.length} вопросов
+            </span>
+            <span className="bg-orange-50 text-orange-700 px-3 py-1.5 rounded-full text-xs font-medium">
+              ⭐ {totalPoints} баллов
+            </span>
+            <span className="bg-amber-50 text-amber-700 px-3 py-1.5 rounded-full text-xs font-medium">
+              ⏱ ~15 мин
+            </span>
+          </div>
+        </div>
+
+        {!nameEntered ? (
+          <div className="space-y-4">
+            <div className="text-left">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                👤 Введите ваше ФИО:
+              </label>
+              <input
+                type="text"
+                value={userName}
+                onChange={(e) => setUserName(e.target.value)}
+                placeholder="Иванов Иван Иванович"
+                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:outline-none transition-colors text-base"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && userName.trim()) {
+                    setNameEntered(true);
+                  }
+                }}
+                autoFocus
+              />
+              <button
+                onClick={() => userName.trim() && setNameEntered(true)}
+                disabled={!userName.trim()}
+                className="mt-3 w-full bg-red-600 text-white py-3.5 rounded-xl font-semibold hover:bg-red-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed active:scale-95 transform"
+              >
+                Продолжить →
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-gray-700 font-medium text-lg">
+              Здравствуйте, <span className="text-red-600">{userName}</span>! 👋
+            </p>
+            
+            <div className="bg-gray-50 rounded-xl p-4 text-left text-sm text-gray-600 space-y-2">
+              <p className="font-semibold text-gray-700">📋 Правила теста:</p>
+              <ul className="space-y-1 text-xs">
+                <li>• Каждый вопрос имеет разную стоимость в баллах</li>
+                <li>• После ответа вы увидите объяснение</li>
+                <li>• Возврат к предыдущим вопросам невозможен</li>
+                <li>• Результат отображается после завершения</li>
+              </ul>
+            </div>
+
+            <button
+              onClick={() => setScreen('quiz')}
+              className="w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-red-700 transition-all transform hover:scale-[1.02] active:scale-95 shadow-lg"
+            >
+              🚀 Начать тест
+            </button>
+            
+            <div className="mt-6 pt-6 border-t border-gray-200">
+              <p className="text-sm text-gray-500 mb-3">
+                📱 Сканируйте QR-код для прохождения с телефона:
+              </p>
+              <div className="inline-block p-4 bg-white rounded-xl shadow-md border border-gray-100">
+                <QRCode
+                  value={currentUrl}
+                  size={160}
+                  level="M"
+                />
+              </div>
+              <div className="mt-3">
+                <p className="text-xs text-gray-400 mb-1">Или откройте ссылку на телефоне:</p>
+                <div className="bg-gray-50 rounded-lg p-2.5 text-xs text-gray-600 break-all font-mono select-all cursor-pointer hover:bg-gray-100 transition-colors">
+                  {currentUrl}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderQuestion = () => {
+    const progress = ((currentQuestion + 1) / questions.length) * 100;
+    
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 flex flex-col">
+        {/* Header */}
+        <div className="bg-white shadow-sm sticky top-0 z-10">
+          <div className="max-w-2xl mx-auto px-4 py-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-gray-500">
+                Вопрос {currentQuestion + 1}/{questions.length}
+              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs bg-red-50 text-red-600 px-2 py-1 rounded-full font-medium">
+                  {question.points} {question.points === 1 ? 'балл' : question.points < 5 ? 'балла' : 'баллов'}
+                </span>
+              </div>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
+              <div 
+                className="bg-gradient-to-r from-red-500 to-orange-500 h-2.5 rounded-full transition-all duration-500 ease-out"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Question Content */}
+        <div className={`flex-1 max-w-2xl mx-auto w-full px-4 py-5 transition-opacity duration-150 ${animateIn ? 'opacity-100' : 'opacity-0'}`}>
+          <div className="bg-white rounded-2xl shadow-lg p-5 md:p-6 mb-4">
+            <div className="flex items-start gap-3 mb-5">
+              <span className="flex-shrink-0 w-9 h-9 bg-gradient-to-br from-red-500 to-orange-500 text-white rounded-xl flex items-center justify-center font-bold text-sm shadow-sm">
+                {currentQuestion + 1}
+              </span>
+              <div className="flex-1">
+                <span className={`inline-block text-xs px-2.5 py-1 rounded-full mb-2 font-medium ${
+                  question.type === 'single' ? 'bg-blue-50 text-blue-700' :
+                  question.type === 'multiple' ? 'bg-purple-50 text-purple-700' :
+                  'bg-green-50 text-green-700'
+                }`}>
+                  {question.type === 'single' && '🔘 Один ответ'}
+                  {question.type === 'multiple' && '☑️ Несколько ответов'}
+                  {question.type === 'fill' && '✏️ Введите ответ'}
+                </span>
+                <h2 className="text-base md:text-lg font-semibold text-gray-800 leading-relaxed">
+                  {question.text}
+                </h2>
+                {question.hint && (
+                  <p className="text-sm text-gray-500 mt-2 italic bg-yellow-50 px-3 py-2 rounded-lg">
+                    💡 Подсказка: {question.hint}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Answer Options */}
+            <div className="space-y-2.5 mt-4">
+              {question.type === 'single' && question.options?.map((option, idx) => {
+                const isSelected = answers[question.id] === option;
+                const isCorrectOption = option === question.correctAnswer;
+                
+                let btnClass = 'border-gray-200 hover:border-red-300 hover:bg-red-50/50';
+                if (isSelected && !showExplanation) {
+                  btnClass = 'border-red-500 bg-red-50 ring-2 ring-red-200';
+                } else if (showExplanation && isSelected) {
+                  btnClass = isCorrectOption ? 'border-green-500 bg-green-50' : 'border-red-500 bg-red-50';
+                } else if (showExplanation && isCorrectOption) {
+                  btnClass = 'border-green-500 bg-green-50';
+                }
+
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => !showExplanation && handleAnswer(option)}
+                    disabled={showExplanation}
+                    className={`w-full text-left p-3.5 md:p-4 rounded-xl border-2 transition-all ${btnClass} ${showExplanation ? 'cursor-default' : 'cursor-pointer active:scale-[0.98]'}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className={`flex-shrink-0 w-7 h-7 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-colors ${
+                        isSelected && !showExplanation ? 'border-red-500 bg-red-500 text-white' :
+                        showExplanation && isSelected && isCorrectOption ? 'border-green-500 bg-green-500 text-white' :
+                        showExplanation && isSelected && !isCorrectOption ? 'border-red-500 bg-red-500 text-white' :
+                        showExplanation && isCorrectOption ? 'border-green-500 bg-green-100 text-green-700' :
+                        'border-gray-300 text-gray-400'
+                      }`}>
+                        {showExplanation && isCorrectOption ? '✓' : 
+                         showExplanation && isSelected && !isCorrectOption ? '✗' :
+                         String.fromCharCode(65 + idx)}
+                      </span>
+                      <span className="text-sm md:text-base text-gray-700">{option}</span>
+                    </div>
+                  </button>
+                );
+              })}
+
+              {question.type === 'multiple' && question.options?.map((option, idx) => {
+                const selected = ((answers[question.id] as string[]) || []).includes(option);
+                const isCorrectOpt = (question.correctAnswer as string[]).includes(option);
+                
+                let btnClass = 'border-gray-200 hover:border-red-300 hover:bg-red-50/50';
+                if (selected && !showExplanation) {
+                  btnClass = 'border-red-500 bg-red-50 ring-2 ring-red-200';
+                } else if (showExplanation && selected) {
+                  btnClass = isCorrectOpt ? 'border-green-500 bg-green-50' : 'border-red-500 bg-red-50';
+                } else if (showExplanation && isCorrectOpt) {
+                  btnClass = 'border-green-500 bg-green-50';
+                }
+
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => !showExplanation && handleToggleMultiple(option)}
+                    disabled={showExplanation}
+                    className={`w-full text-left p-3.5 md:p-4 rounded-xl border-2 transition-all ${btnClass} ${showExplanation ? 'cursor-default' : 'cursor-pointer active:scale-[0.98]'}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className={`flex-shrink-0 w-7 h-7 rounded-lg border-2 flex items-center justify-center text-xs font-bold transition-colors ${
+                        selected && !showExplanation ? 'border-red-500 bg-red-500 text-white' :
+                        showExplanation && selected && isCorrectOpt ? 'border-green-500 bg-green-500 text-white' :
+                        showExplanation && selected && !isCorrectOpt ? 'border-red-500 bg-red-500 text-white' :
+                        showExplanation && isCorrectOpt ? 'border-green-500 bg-green-100 text-green-700' :
+                        'border-gray-300'
+                      }`}>
+                        {selected && (showExplanation ? (isCorrectOpt ? '✓' : '✗') : '✓')}
+                      </span>
+                      <span className="text-sm md:text-base text-gray-700">{option}</span>
+                    </div>
+                  </button>
+                );
+              })}
+
+              {question.type === 'fill' && (
+                <div>
+                  <input
+                    type="text"
+                    value={(answers[question.id] as string) || ''}
+                    onChange={(e) => handleAnswer(e.target.value)}
+                    disabled={showExplanation}
+                    placeholder="Введите ваш ответ..."
+                    className={`w-full px-4 py-3.5 border-2 rounded-xl focus:outline-none transition-colors text-base ${
+                      showExplanation
+                        ? isCorrect(question)
+                          ? 'border-green-500 bg-green-50'
+                          : 'border-red-500 bg-red-50'
+                        : 'border-gray-200 focus:border-red-500'
+                    }`}
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && answers[question.id] && !showExplanation) {
+                        setShowExplanation(true);
+                      }
+                    }}
+                  />
+                  {showExplanation && !isCorrect(question) && (
+                    <p className="mt-2 text-sm text-green-600 font-medium bg-green-50 px-3 py-2 rounded-lg">
+                      ✅ Правильный ответ: <strong>{question.correctAnswer as string}</strong>
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Explanation */}
+            {showExplanation && (
+              <div className={`mt-5 p-4 rounded-xl border animate-fade-in ${
+                isCorrect(question) ? 'bg-green-50 border-green-200' : 'bg-orange-50 border-orange-200'
+              }`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-lg">{isCorrect(question) ? '✅' : '❌'}</span>
+                  <p className={`text-sm font-bold ${isCorrect(question) ? 'text-green-700' : 'text-orange-700'}`}>
+                    {isCorrect(question) ? 'Правильно! +' + question.points + ' баллов' : 'Неправильно'}
+                  </p>
+                </div>
+                <p className="text-sm text-gray-700 leading-relaxed">{question.explanation}</p>
+              </div>
+            )}
+          </div>
+
+          {/* Navigation */}
+          <div className="flex gap-3">
+            {!showExplanation ? (
+              <button
+                onClick={() => {
+                  if (answers[question.id] && (
+                    question.type === 'fill' ? (answers[question.id] as string).trim().length > 0 :
+                    question.type === 'multiple' ? ((answers[question.id] as string[]) || []).length > 0 :
+                    true
+                  )) {
+                    setShowExplanation(true);
+                  }
+                }}
+                disabled={!answers[question.id] || (
+                  question.type === 'fill' ? !(answers[question.id] as string)?.trim() :
+                  question.type === 'multiple' ? ((answers[question.id] as string[]) || []).length === 0 :
+                  false
+                )}
+                className="flex-1 bg-red-600 text-white py-4 rounded-xl font-bold text-base hover:bg-red-700 transition-all disabled:bg-gray-300 disabled:cursor-not-allowed shadow-lg active:scale-95 transform"
+              >
+                Проверить ответ ✓
+              </button>
+            ) : (
+              <button
+                onClick={handleNext}
+                className="flex-1 bg-gradient-to-r from-red-600 to-orange-600 text-white py-4 rounded-xl font-bold text-base hover:from-red-700 hover:to-orange-700 transition-all shadow-lg active:scale-95 transform"
+              >
+                {currentQuestion < questions.length - 1 ? 'Далее →' : 'Завершить тест 🏁'}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderResult = () => {
+    const grade = getGrade();
+    const percentage = Math.round((score / totalPoints) * 100);
+    const correctCount = getCorrectCount();
+
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-red-900 via-red-800 to-orange-900 flex items-center justify-center p-4">
+        <div className="max-w-lg w-full bg-white rounded-2xl shadow-2xl p-6 md:p-8 text-center animate-fade-in">
+          <div className="text-6xl mb-3">{grade.emoji}</div>
+          <h1 className="text-2xl md:text-3xl font-bold text-gray-800 mb-1">
+            Тест завершён!
+          </h1>
+          <p className="text-gray-500 text-sm mb-4">{userName}</p>
+          
+          <div className={`${grade.bg} rounded-2xl p-6 mb-5`}>
+            <div className={`text-3xl font-bold ${grade.color} mb-1`}>
+              {grade.grade}
+            </div>
+            <p className="text-sm text-gray-600 mb-3">{grade.desc}</p>
+            <div className="text-4xl font-bold text-gray-800 mb-1">
+              {score}<span className="text-lg text-gray-400">/{totalPoints}</span>
+            </div>
+            <div className="text-gray-500 text-sm">
+              {percentage}% правильных ответов
+            </div>
+            
+            {/* Progress bar */}
+            <div className="w-full bg-white/50 rounded-full h-3 mt-4 overflow-hidden">
+              <div 
+                className={`h-3 rounded-full transition-all duration-1000 ease-out ${
+                  percentage >= 90 ? 'bg-green-500' :
+                  percentage >= 75 ? 'bg-blue-500' :
+                  percentage >= 60 ? 'bg-yellow-500' : 'bg-red-500'
+                }`}
+                style={{ width: `${percentage}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Statistics */}
+          <div className="grid grid-cols-3 gap-3 mb-6">
+            <div className="bg-green-50 rounded-xl p-3">
+              <div className="text-xl font-bold text-green-600">{correctCount}</div>
+              <div className="text-xs text-gray-600 mt-0.5">Верных</div>
+            </div>
+            <div className="bg-red-50 rounded-xl p-3">
+              <div className="text-xl font-bold text-red-600">{questions.length - correctCount}</div>
+              <div className="text-xs text-gray-600 mt-0.5">Ошибок</div>
+            </div>
+            <div className="bg-blue-50 rounded-xl p-3">
+              <div className="text-xl font-bold text-blue-600">{percentage}%</div>
+              <div className="text-xs text-gray-600 mt-0.5">Точность</div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <button
+              onClick={() => setScreen('review')}
+              className="w-full bg-gray-100 text-gray-700 py-3.5 rounded-xl font-semibold hover:bg-gray-200 transition-all active:scale-95 transform"
+            >
+              📋 Просмотреть ответы
+            </button>
+            <button
+              onClick={restartQuiz}
+              className="w-full bg-red-600 text-white py-3.5 rounded-xl font-bold hover:bg-red-700 transition-all active:scale-95 transform shadow-lg"
+            >
+              🔄 Пройти заново
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderReview = () => {
+    return (
+      <div className="min-h-screen bg-gray-50 pb-8">
+        {/* Header */}
+        <div className="bg-white shadow-sm sticky top-0 z-10">
+          <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
+            <button
+              onClick={() => setScreen('result')}
+              className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors"
+            >
+              ← 
+            </button>
+            <h1 className="text-lg font-bold text-gray-800">Разбор ответов</h1>
+          </div>
+        </div>
+
+        <div className="max-w-2xl mx-auto px-4 py-5 space-y-4">
+          {questions.map((q, idx) => {
+            const correct = isCorrect(q);
+            return (
+              <div key={q.id} className={`bg-white rounded-xl shadow-sm border-l-4 p-4 ${
+                correct ? 'border-green-500' : 'border-red-500'
+              }`}>
+                <div className="flex items-start gap-3">
+                  <span className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white ${
+                    correct ? 'bg-green-500' : 'bg-red-500'
+                  }`}>
+                    {correct ? '✓' : '✗'}
+                  </span>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-gray-800 mb-2">
+                      {idx + 1}. {q.text}
+                    </p>
+                    <div className="text-xs space-y-1">
+                      <p className="text-gray-500">
+                        Ваш ответ: <span className={correct ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                          {Array.isArray(answers[q.id]) ? (answers[q.id] as string[]).join(', ') : (answers[q.id] as string) || '—'}
+                        </span>
+                      </p>
+                      {!correct && (
+                        <p className="text-gray-500">
+                          Правильный ответ: <span className="text-green-600 font-medium">
+                            {Array.isArray(q.correctAnswer) ? (q.correctAnswer as string[]).join(', ') : q.correctAnswer as string}
+                          </span>
+                        </p>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2 italic bg-gray-50 p-2 rounded-lg">
+                      {q.explanation}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          <button
+            onClick={restartQuiz}
+            className="w-full bg-red-600 text-white py-4 rounded-xl font-bold hover:bg-red-700 transition-all active:scale-95 transform shadow-lg"
+          >
+            🔄 Пройти тест заново
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <div/>
+    <div className="font-sans antialiased">
+      {screen === 'home' && renderHome()}
+      {screen === 'quiz' && renderQuestion()}
+      {screen === 'result' && renderResult()}
+      {screen === 'review' && renderReview()}
+    </div>
   );
 }
+
+export default App;
