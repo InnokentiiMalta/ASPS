@@ -307,7 +307,7 @@ function App() {
               ⭐ {totalPoints} баллов
             </span>
             <span className="bg-amber-50 text-amber-700 px-3 py-1.5 rounded-full text-xs font-medium">
-              ⏱ 2 мин/вопрос
+              ⏱ ~30 мин
             </span>
           </div>
         </div>
@@ -349,7 +349,7 @@ function App() {
             <div className="bg-gray-50 rounded-xl p-4 text-left text-sm text-gray-600 space-y-2">
               <p className="font-semibold text-gray-700">📋 Правила теста:</p>
               <ul className="space-y-1 text-xs">
-                <li>• {allQuestions.length} вопросов в случайном порядке</li>
+                <li>• {allQuestions.length} вопросов в случайном порядке (каждый раз по-новому)</li>
                 <li>• На каждый вопрос — 2 минуты</li>
                 <li>• Вопросы с одним ответом, множественным выбором, вводом текста и исключением</li>
                 <li>• После ответа — объяснение со ссылкой на нормативный документ</li>
