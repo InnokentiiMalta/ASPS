@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import QRCode from 'react-qr-code';
-import { questions as allQuestions, totalPoints, Question, shuffleArray } from './data/questions';
+import { regularQuestions, calculationQuestions, Question, shuffleArray } from './data/questions';
 
 type Screen = 'home' | 'quiz' | 'result' | 'review';
 
-const QUESTION_TIME_LIMIT = 120; // 2 минуты в секундах
+const QUESTION_TIME_LIMIT = 120; // 2 минуты
+const TOTAL_QUESTIONS = 25;
+const CALC_QUESTIONS_COUNT = 5; // Каждый 5-й — вычислительный
+const REGULAR_QUESTIONS_COUNT = TOTAL_QUESTIONS - CALC_QUESTIONS_COUNT; // 20
 
 function App() {
   const [screen, setScreen] = useState<Screen>('home');
-  const [shuffledQuestions, setShuffledQuestions] = useState<Question[]>([]);
+  const [testQuestions, setTestQuestions] = useState<Question[]>([]);
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState<Record<number, string | string[]>>({});
   const [score, setScore] = useState(0);
@@ -22,7 +25,7 @@ function App() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const currentUrl = window.location.origin + window.location.pathname;
-  const question = shuffledQuestions[currentQuestion];
+  const question = testQuestions[currentQuestion];
 
   // Таймер
   useEffect(() => {
@@ -30,7 +33,6 @@ function App() {
       timerRef.current = setInterval(() => {
         setTimeLeft(prev => {
           if (prev <= 1) {
-            // Время вышло — автоматически проверяем и переходим
             if (timerRef.current) clearInterval(timerRef.current);
             setTimerActive(false);
             setTimeout(() => {
@@ -79,7 +81,7 @@ function App() {
 
   const calculateScore = () => {
     let total = 0;
-    shuffledQuestions.forEach((q) => {
+    testQuestions.forEach((q) => {
       if (isCorrect(q)) {
         total += q.points;
       }
@@ -93,7 +95,7 @@ function App() {
     if (timerRef.current) clearInterval(timerRef.current);
     setAnimateIn(false);
     setTimeout(() => {
-      if (currentQuestion < shuffledQuestions.length - 1) {
+      if (currentQuestion < testQuestions.length - 1) {
         setCurrentQuestion(prev => prev + 1);
         setTimeLeft(QUESTION_TIME_LIMIT);
         setTimerActive(true);
@@ -121,8 +123,27 @@ function App() {
   };
 
   const startQuiz = () => {
-    const shuffled = shuffleArray(allQuestions);
-    setShuffledQuestions(shuffled);
+    // Выбираем 20 случайных обычных вопросов и 5 вычислительных
+    const shuffledRegular = shuffleArray(regularQuestions).slice(0, REGULAR_QUESTIONS_COUNT);
+    const shuffledCalc = shuffleArray(calculationQuestions).slice(0, CALC_QUESTIONS_COUNT);
+    
+    // Формируем итоговый массив: каждый 5-й вопрос — вычислительный
+    const finalQuestions: Question[] = [];
+    let calcIndex = 0;
+    let regularIndex = 0;
+    
+    for (let i = 0; i < TOTAL_QUESTIONS; i++) {
+      if ((i + 1) % 5 === 0 && calcIndex < shuffledCalc.length) {
+        // Каждый 5-й вопрос — вычислительный (позиции 5, 10, 15, 20, 25)
+        finalQuestions.push(shuffledCalc[calcIndex]);
+        calcIndex++;
+      } else {
+        finalQuestions.push(shuffledRegular[regularIndex]);
+        regularIndex++;
+      }
+    }
+    
+    setTestQuestions(finalQuestions);
     setCurrentQuestion(0);
     setAnswers({});
     setScore(0);
@@ -147,7 +168,8 @@ function App() {
   };
 
   const getGrade = () => {
-    const percentage = (score / totalPoints) * 100;
+    const maxScore = testQuestions.reduce((sum, q) => sum + q.points, 0);
+    const percentage = (score / maxScore) * 100;
     if (percentage >= 90) return { grade: 'Отлично', color: 'text-green-600', bg: 'bg-green-50', emoji: '🏆', desc: 'Превосходное знание материала!' };
     if (percentage >= 75) return { grade: 'Хорошо', color: 'text-blue-600', bg: 'bg-blue-50', emoji: '⭐', desc: 'Хороший уровень подготовки.' };
     if (percentage >= 60) return { grade: 'Удовлетворительно', color: 'text-yellow-600', bg: 'bg-yellow-50', emoji: '👍', desc: 'Базовые знания есть, но есть пробелы.' };
@@ -155,7 +177,11 @@ function App() {
   };
 
   const getCorrectCount = () => {
-    return shuffledQuestions.filter(q => isCorrect(q)).length;
+    return testQuestions.filter(q => isCorrect(q)).length;
+  };
+
+  const getMaxScore = () => {
+    return testQuestions.reduce((sum, q) => sum + q.points, 0);
   };
 
   const formatTime = (seconds: number): string => {
@@ -178,7 +204,8 @@ function App() {
 
   const generateTxtReport = (): string => {
     const grade = getGrade();
-    const percentage = Math.round((score / totalPoints) * 100);
+    const maxScore = getMaxScore();
+    const percentage = Math.round((score / maxScore) * 100);
     const date = new Date().toLocaleString('ru-RU');
     
     let report = `═══════════════════════════════════════════
@@ -194,20 +221,21 @@ function App() {
   ИТОГОВЫЙ РЕЗУЛЬТАТ
 ───────────────────────────────────────────
   Оценка: ${grade.grade}
-  Баллы: ${score} / ${totalPoints}
+  Баллы: ${score} / ${maxScore}
   Процент: ${percentage}%
-  Правильных ответов: ${getCorrectCount()} из ${shuffledQuestions.length}
+  Правильных ответов: ${getCorrectCount()} из ${testQuestions.length}
 ───────────────────────────────────────────
 
 ДЕТАЛИЗАЦИЯ ОТВЕТОВ:
 
 `;
 
-    shuffledQuestions.forEach((q, idx) => {
+    testQuestions.forEach((q, idx) => {
       const correct = isCorrect(q);
       const userAnswer = answers[q.id];
+      const isCalc = calculationQuestions.some(cq => cq.id === q.id);
       
-      report += `${idx + 1}. [${correct ? '✓' : '✗'}] ${q.text}\n`;
+      report += `${idx + 1}. [${correct ? '✓' : '✗'}] ${isCalc ? '[ВЫЧИСЛЕНИЕ] ' : ''}${q.text}\n`;
       
       if (q.type === 'multiple') {
         const userArr = Array.isArray(userAnswer) ? userAnswer : [];
@@ -243,7 +271,7 @@ function App() {
       const shareData = {
         files: [file],
         title: 'Результаты теста АСПС',
-        text: `Результаты тестирования по АСПС: ${userName} — ${score}/${totalPoints} баллов`
+        text: `Результаты тестирования по АСПС: ${userName} — ${score}/${getMaxScore()} баллов`
       };
       
       try {
@@ -301,13 +329,13 @@ function App() {
           </p>
           <div className="flex items-center justify-center gap-2 flex-wrap">
             <span className="bg-red-50 text-red-700 px-3 py-1.5 rounded-full text-xs font-medium">
-              📝 {allQuestions.length} вопросов
+              📝 {TOTAL_QUESTIONS} вопросов
             </span>
             <span className="bg-orange-50 text-orange-700 px-3 py-1.5 rounded-full text-xs font-medium">
-              ⭐ {totalPoints} баллов
+              🧮 {CALC_QUESTIONS_COUNT} вычислений
             </span>
             <span className="bg-amber-50 text-amber-700 px-3 py-1.5 rounded-full text-xs font-medium">
-              ⏱ ~30 мин
+              ⏱ 2 мин/вопрос
             </span>
           </div>
         </div>
@@ -349,8 +377,9 @@ function App() {
             <div className="bg-gray-50 rounded-xl p-4 text-left text-sm text-gray-600 space-y-2">
               <p className="font-semibold text-gray-700">📋 Правила теста:</p>
               <ul className="space-y-1 text-xs">
-                <li>• {allQuestions.length} вопросов в случайном порядке (каждый раз по-новому)</li>
+                <li>• {TOTAL_QUESTIONS} вопросов из базы {regularQuestions.length + calculationQuestions.length} (каждый раз по-новому)</li>
                 <li>• На каждый вопрос — 2 минуты</li>
+                <li>• Каждый 5-й вопрос — на вычисления</li>
                 <li>• Вопросы с одним ответом, множественным выбором, вводом текста и исключением</li>
                 <li>• После ответа — объяснение со ссылкой на нормативный документ</li>
                 <li>• По завершении можно экспортировать результаты в TXT</li>
@@ -388,8 +417,10 @@ function App() {
     </div>
   );
 
-  const getTypeLabel = (type: string) => {
-    switch (type) {
+  const getTypeLabel = (q: Question) => {
+    const isCalc = calculationQuestions.some(cq => cq.id === q.id);
+    if (isCalc) return { label: '🧮 Вычисление', className: 'bg-amber-50 text-amber-700' };
+    switch (q.type) {
       case 'single': return { label: '🔘 Один ответ', className: 'bg-blue-50 text-blue-700' };
       case 'multiple': return { label: '☑️ Несколько ответов', className: 'bg-purple-50 text-purple-700' };
       case 'fill': return { label: '✏️ Введите ответ', className: 'bg-green-50 text-green-700' };
@@ -401,9 +432,10 @@ function App() {
   const renderQuestion = () => {
     if (!question) return null;
     
-    const progress = ((currentQuestion + 1) / shuffledQuestions.length) * 100;
-    const typeInfo = getTypeLabel(question.type);
+    const progress = ((currentQuestion + 1) / testQuestions.length) * 100;
+    const typeInfo = getTypeLabel(question);
     const timerProgress = (timeLeft / QUESTION_TIME_LIMIT) * 100;
+    const isCalc = calculationQuestions.some(cq => cq.id === question.id);
     
     return (
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 flex flex-col">
@@ -412,7 +444,7 @@ function App() {
           <div className="max-w-2xl mx-auto px-4 py-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium text-gray-500">
-                Вопрос {currentQuestion + 1}/{shuffledQuestions.length}
+                Вопрос {currentQuestion + 1}/{testQuestions.length}
               </span>
               <div className="flex items-center gap-2">
                 <span className="text-xs bg-red-50 text-red-600 px-2 py-1 rounded-full font-medium">
@@ -451,9 +483,11 @@ function App() {
 
         {/* Question Content */}
         <div className={`flex-1 max-w-2xl mx-auto w-full px-4 py-5 transition-opacity duration-150 ${animateIn ? 'opacity-100' : 'opacity-0'}`}>
-          <div className="bg-white rounded-2xl shadow-lg p-5 md:p-6 mb-4">
+          <div className={`bg-white rounded-2xl shadow-lg p-5 md:p-6 mb-4 ${isCalc ? 'ring-2 ring-amber-200' : ''}`}>
             <div className="flex items-start gap-3 mb-5">
-              <span className="flex-shrink-0 w-9 h-9 bg-gradient-to-br from-red-500 to-orange-500 text-white rounded-xl flex items-center justify-center font-bold text-sm shadow-sm">
+              <span className={`flex-shrink-0 w-9 h-9 text-white rounded-xl flex items-center justify-center font-bold text-sm shadow-sm ${
+                isCalc ? 'bg-gradient-to-br from-amber-500 to-orange-500' : 'bg-gradient-to-br from-red-500 to-orange-500'
+              }`}>
                 {currentQuestion + 1}
               </span>
               <div className="flex-1">
@@ -634,7 +668,7 @@ function App() {
                 onClick={handleNext}
                 className="flex-1 bg-gradient-to-r from-red-600 to-orange-600 text-white py-4 rounded-xl font-bold text-base hover:from-red-700 hover:to-orange-700 transition-all shadow-lg active:scale-95 transform"
               >
-                {currentQuestion < shuffledQuestions.length - 1 ? 'Далее →' : 'Завершить тест 🏁'}
+                {currentQuestion < testQuestions.length - 1 ? 'Далее →' : 'Завершить тест 🏁'}
               </button>
             )}
           </div>
@@ -645,7 +679,8 @@ function App() {
 
   const renderResult = () => {
     const grade = getGrade();
-    const percentage = Math.round((score / totalPoints) * 100);
+    const maxScore = getMaxScore();
+    const percentage = Math.round((score / maxScore) * 100);
     const correctCount = getCorrectCount();
 
     return (
@@ -663,7 +698,7 @@ function App() {
             </div>
             <p className="text-sm text-gray-600 mb-3">{grade.desc}</p>
             <div className="text-4xl font-bold text-gray-800 mb-1">
-              {score}<span className="text-lg text-gray-400">/{totalPoints}</span>
+              {score}<span className="text-lg text-gray-400">/{maxScore}</span>
             </div>
             <div className="text-gray-500 text-sm">
               {percentage}% правильных ответов
@@ -688,7 +723,7 @@ function App() {
               <div className="text-xs text-gray-600 mt-0.5">Верных</div>
             </div>
             <div className="bg-red-50 rounded-xl p-3">
-              <div className="text-xl font-bold text-red-600">{shuffledQuestions.length - correctCount}</div>
+              <div className="text-xl font-bold text-red-600">{testQuestions.length - correctCount}</div>
               <div className="text-xs text-gray-600 mt-0.5">Ошибок</div>
             </div>
             <div className="bg-blue-50 rounded-xl p-3">
@@ -768,12 +803,13 @@ function App() {
         </div>
 
         <div className="max-w-2xl mx-auto px-4 py-5 space-y-4">
-          {shuffledQuestions.map((q, idx) => {
+          {testQuestions.map((q, idx) => {
             const correct = isCorrect(q);
+            const isCalc = calculationQuestions.some(cq => cq.id === q.id);
             return (
               <div key={q.id} className={`bg-white rounded-xl shadow-sm border-l-4 p-4 ${
                 correct ? 'border-green-500' : 'border-red-500'
-              }`}>
+              } ${isCalc ? 'ring-1 ring-amber-200' : ''}`}>
                 <div className="flex items-start gap-3">
                   <span className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white ${
                     correct ? 'bg-green-500' : 'bg-red-500'
@@ -781,9 +817,16 @@ function App() {
                     {correct ? '✓' : '✗'}
                   </span>
                   <div className="flex-1">
-                    <p className="text-sm font-medium text-gray-800 mb-2">
-                      {idx + 1}. {q.text}
-                    </p>
+                    <div className="flex items-center gap-2 mb-2">
+                      <p className="text-sm font-medium text-gray-800">
+                        {idx + 1}. {q.text}
+                      </p>
+                      {isCalc && (
+                        <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
+                          🧮 Вычисление
+                        </span>
+                      )}
+                    </div>
                     <div className="text-xs space-y-1">
                       <p className="text-gray-500">
                         Ваш ответ: <span className={correct ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
