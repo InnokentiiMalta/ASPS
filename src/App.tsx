@@ -29,6 +29,7 @@ function App() {
   const [userGroup, setUserGroup] = useState('');
   const [testStartTime, setTestStartTime] = useState<Date | null>(null);
   const [testEndTime, setTestEndTime] = useState<Date | null>(null);
+  const [shuffledRightItems, setShuffledRightItems] = useState<Record<number, string[]>>({});
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const currentUrl = window.location.origin + window.location.pathname;
@@ -60,6 +61,20 @@ function App() {
   useEffect(() => {
     setAnimateIn(true);
   }, [screen, currentQuestion]);
+
+  // Инициализация перемешанных элементов для интерактивных задач
+  useEffect(() => {
+    if (question && question.type === 'interactive' && question.interactiveType === 'matching' && question.matchPairs) {
+      // Инициализируем только если ещё не инициализировано для этого вопроса
+      if (!shuffledRightItems[question.id]) {
+        const shuffled = shuffleArray(question.matchPairs.map(p => p.right));
+        setShuffledRightItems(prev => ({
+          ...prev,
+          [question.id]: shuffled
+        }));
+      }
+    }
+  }, [currentQuestion, question]);
 
   const handleAnswer = (answer: string | string[]) => {
     setAnswers(prev => ({ ...prev, [question.id]: answer }));
@@ -235,6 +250,7 @@ function App() {
     setAnswers({});
     setSelectedZones({});
     setMatchAnswers({});
+    setShuffledRightItems({});
     setScore(0);
     setShowExplanation(false);
     setTimeLeft(QUESTION_TIME_LIMIT);
@@ -248,6 +264,7 @@ function App() {
     setAnswers({});
     setSelectedZones({});
     setMatchAnswers({});
+    setShuffledRightItems({});
     setScore(0);
     setShowExplanation(false);
     setUserName('');
@@ -911,7 +928,7 @@ function App() {
                     {/* Правый столбец - значения для перетаскивания */}
                     <div className="space-y-2">
                       <p className="text-xs font-semibold text-gray-600 mb-2">Перетащите сюда:</p>
-                      {shuffleArray(question.matchPairs.map(p => p.right)).map((rightValue, idx) => {
+                      {(shuffledRightItems[question.id] || []).map((rightValue, idx) => {
                         const isUsed = Object.values(matchAnswers[question.id] || {}).includes(rightValue);
                         
                         return (
