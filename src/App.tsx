@@ -24,6 +24,8 @@ function App() {
   const [timeLeft, setTimeLeft] = useState(QUESTION_TIME_LIMIT);
   const [timerActive, setTimerActive] = useState(false);
   const [selectedZones, setSelectedZones] = useState<Record<number, string[]>>({});
+  const [matchAnswers, setMatchAnswers] = useState<Record<number, Record<string, string>>>({});
+  const [draggedItem, setDraggedItem] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const currentUrl = window.location.origin + window.location.pathname;
@@ -62,11 +64,25 @@ function App() {
 
   const isCorrect = useCallback((q: Question): boolean => {
     // Для интерактивных вопросов
-    if (q.type === 'interactive' && q.correctZones) {
-      const userZones = selectedZones[q.id] || [];
-      if (userZones.length === 0) return false;
-      return q.correctZones.length === userZones.length && 
-        q.correctZones.every(z => userZones.includes(z));
+    if (q.type === 'interactive') {
+      // Для задач типа matching
+      if (q.interactiveType === 'matching' && q.matchPairs) {
+        const userMatches = matchAnswers[q.id] || {};
+        if (Object.keys(userMatches).length !== q.matchPairs.length) return false;
+        
+        return q.matchPairs.every(pair => {
+          const userAnswer = userMatches[pair.id];
+          return userAnswer === pair.right;
+        });
+      }
+      
+      // Для задач с зонами
+      if (q.correctZones) {
+        const userZones = selectedZones[q.id] || [];
+        if (userZones.length === 0) return false;
+        return q.correctZones.length === userZones.length && 
+          q.correctZones.every(z => userZones.includes(z));
+      }
     }
 
     const userAnswer = answers[q.id];
@@ -87,7 +103,7 @@ function App() {
     }
     
     return false;
-  }, [answers, selectedZones]);
+  }, [answers, selectedZones, matchAnswers]);
 
   const calculateScore = () => {
     let total = 0;
@@ -141,8 +157,33 @@ function App() {
     }
   };
 
+  const handleMatchDrop = (leftId: string, rightValue: string) => {
+    setMatchAnswers(prev => ({
+      ...prev,
+      [question.id]: {
+        ...prev[question.id],
+        [leftId]: rightValue
+      }
+    }));
+    setDraggedItem(null);
+  };
+
+  const handleMatchRemove = (leftId: string) => {
+    setMatchAnswers(prev => {
+      const current = { ...prev[question.id] };
+      delete current[leftId];
+      return { ...prev, [question.id]: current };
+    });
+  };
+
   const hasInteractiveAnswer = (): boolean => {
     if (question.type !== 'interactive') return false;
+    
+    if (question.interactiveType === 'matching' && question.matchPairs) {
+      const answers = matchAnswers[question.id] || {};
+      return Object.keys(answers).length === question.matchPairs.length;
+    }
+    
     const zones = selectedZones[question.id] || [];
     return zones.length > 0;
   };
@@ -185,6 +226,7 @@ function App() {
     setCurrentQuestion(0);
     setAnswers({});
     setSelectedZones({});
+    setMatchAnswers({});
     setScore(0);
     setShowExplanation(false);
     setTimeLeft(QUESTION_TIME_LIMIT);
@@ -197,6 +239,7 @@ function App() {
     setCurrentQuestion(0);
     setAnswers({});
     setSelectedZones({});
+    setMatchAnswers({});
     setScore(0);
     setShowExplanation(false);
     setUserName('');
@@ -278,7 +321,20 @@ function App() {
       
       report += `${idx + 1}. [${correct ? '✓' : '✗'}] ${isCalc ? '[ВЫЧИСЛЕНИЕ] ' : ''}${isInteractive ? '[ГРАФИЧЕСКАЯ] ' : ''}${q.text}\n`;
       
-      if (isInteractive && q.correctZones) {
+      if (isInteractive && q.interactiveType === 'matching' && q.matchPairs) {
+        const userMatches = matchAnswers[q.id] || {};
+        report += `   Установленные соответствия:\n`;
+        q.matchPairs.forEach(pair => {
+          const userAnswer = userMatches[pair.id];
+          report += `     ${pair.left} → ${userAnswer || '—'}\n`;
+        });
+        if (!correct) {
+          report += `   Правильные соответствия:\n`;
+          q.matchPairs.forEach(pair => {
+            report += `     ${pair.left} → ${pair.right}\n`;
+          });
+        }
+      } else if (isInteractive && q.correctZones) {
         const userZones = selectedZones[q.id] || [];
         report += `   Выбрано зон: ${userZones.length > 0 ? userZones.join(', ') : '—'}\n`;
         report += `   Правильные зоны: ${q.correctZones.join(', ')}\n`;
@@ -679,6 +735,110 @@ function App() {
               </div>
             )}
 
+            {/* Interactive Matching Task */}
+            {question.type === 'interactive' && question.interactiveType === 'matching' && question.matchPairs && (
+              <div className="mt-4">
+                <div className="bg-gray-50 rounded-xl p-4 border-2 border-indigo-200">
+                  <div className="grid grid-cols-2 gap-4">
+                    {/* Левый столбец - элементы */}
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-gray-600 mb-2">Элементы:</p>
+                      {question.matchPairs.map((pair) => {
+                        const userAnswer = (matchAnswers[question.id] || {})[pair.id];
+                        const isCorrectMatch = userAnswer === pair.right;
+                        
+                        let borderColor = 'border-gray-300';
+                        let bgColor = 'bg-white';
+                        
+                        if (showExplanation) {
+                          if (userAnswer) {
+                            borderColor = isCorrectMatch ? 'border-green-500' : 'border-red-500';
+                            bgColor = isCorrectMatch ? 'bg-green-50' : 'bg-red-50';
+                          }
+                        } else if (userAnswer) {
+                          borderColor = 'border-indigo-500';
+                          bgColor = 'bg-indigo-50';
+                        }
+                        
+                        return (
+                          <div
+                            key={pair.id}
+                            className={`p-3 rounded-lg border-2 ${borderColor} ${bgColor} transition-all`}
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              e.currentTarget.classList.add('ring-2', 'ring-indigo-400');
+                            }}
+                            onDragLeave={(e) => {
+                              e.currentTarget.classList.remove('ring-2', 'ring-indigo-400');
+                            }}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              e.currentTarget.classList.remove('ring-2', 'ring-indigo-400');
+                              const rightValue = e.dataTransfer.getData('text/plain');
+                              handleMatchDrop(pair.id, rightValue);
+                            }}
+                          >
+                            <p className="text-sm font-medium text-gray-800">{pair.left}</p>
+                            {userAnswer && (
+                              <div className="mt-2 flex items-center justify-between">
+                                <p className="text-xs text-gray-600">→ {userAnswer}</p>
+                                {!showExplanation && (
+                                  <button
+                                    onClick={() => handleMatchRemove(pair.id)}
+                                    className="text-xs text-red-600 hover:text-red-800"
+                                  >
+                                    ✕
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                            {showExplanation && !userAnswer && (
+                              <p className="mt-2 text-xs text-green-600">→ {pair.right}</p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    
+                    {/* Правый столбец - значения для перетаскивания */}
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-gray-600 mb-2">Перетащите сюда:</p>
+                      {shuffleArray(question.matchPairs.map(p => p.right)).map((rightValue, idx) => {
+                        const isUsed = Object.values(matchAnswers[question.id] || {}).includes(rightValue);
+                        
+                        return (
+                          <div
+                            key={idx}
+                            draggable={!showExplanation && !isUsed}
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData('text/plain', rightValue);
+                              setDraggedItem(rightValue);
+                            }}
+                            onDragEnd={() => setDraggedItem(null)}
+                            className={`p-3 rounded-lg border-2 transition-all ${
+                              isUsed 
+                                ? 'border-gray-200 bg-gray-100 opacity-50 cursor-not-allowed' 
+                                : 'border-indigo-300 bg-indigo-100 cursor-grab active:cursor-grabbing hover:border-indigo-500 hover:bg-indigo-200'
+                            }`}
+                          >
+                            <p className="text-sm text-gray-700">{rightValue}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  
+                  {/* Инструкция */}
+                  {!showExplanation && (
+                    <div className="mt-3 text-xs text-gray-600 text-center">
+                      <p>Перетащите элементы из правого столбца в соответствующие позиции слева</p>
+                      <p className="mt-1">Установлено соответствий: {Object.keys(matchAnswers[question.id] || {}).length} из {question.matchPairs.length}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Answer Options */}
             <div className="space-y-2.5 mt-4">
               {(question.type === 'single' || question.type === 'exclude') && question.options?.map((option, idx) => {
@@ -1011,7 +1171,29 @@ function App() {
                       )}
                     </div>
                     <div className="text-xs space-y-1">
-                      {q.type === 'interactive' && q.correctZones ? (
+                      {q.type === 'interactive' && q.interactiveType === 'matching' && q.matchPairs ? (
+                        <>
+                          <p className="text-gray-500 font-medium mb-1">Установленные соответствия:</p>
+                          <div className="space-y-1">
+                            {q.matchPairs.map((pair) => {
+                              const userAnswer = (matchAnswers[q.id] || {})[pair.id];
+                              const isMatchCorrect = userAnswer === pair.right;
+                              return (
+                                <div key={pair.id} className="flex items-start gap-1">
+                                  <span className={isMatchCorrect ? 'text-green-600' : 'text-red-600'}>
+                                    {isMatchCorrect ? '✓' : '✗'}
+                                  </span>
+                                  <span className="text-gray-700">{pair.left}</span>
+                                  <span className="text-gray-400">→</span>
+                                  <span className={isMatchCorrect ? 'text-green-600' : 'text-red-600'}>
+                                    {userAnswer || '—'}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </>
+                      ) : q.type === 'interactive' && q.correctZones ? (
                         <>
                           <p className="text-gray-500">
                             Выбрано зон: <span className={correct ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
