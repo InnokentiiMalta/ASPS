@@ -13,6 +13,7 @@ function App() {
   const [userName, setUserName] = useState('');
   const [nameEntered, setNameEntered] = useState(false);
   const [animateIn, setAnimateIn] = useState(true);
+  const [showExportMenu, setShowExportMenu] = useState(false);
 
   const currentUrl = window.location.origin + window.location.pathname;
   const question = questions[currentQuestion];
@@ -29,7 +30,7 @@ function App() {
     const userAnswer = answers[q.id];
     if (!userAnswer) return false;
 
-    if (q.type === 'single' || q.type === 'fill') {
+    if (q.type === 'single' || q.type === 'fill' || q.type === 'exclude') {
       const correct = q.correctAnswer as string;
       return typeof userAnswer === 'string' && 
         userAnswer.trim().toLowerCase() === correct.trim().toLowerCase();
@@ -70,17 +71,6 @@ function App() {
     }, 150);
   };
 
-  const handlePrev = () => {
-    if (currentQuestion > 0) {
-      setShowExplanation(false);
-      setAnimateIn(false);
-      setTimeout(() => {
-        setCurrentQuestion(prev => prev - 1);
-        setAnimateIn(true);
-      }, 150);
-    }
-  };
-
   const handleToggleMultiple = (option: string) => {
     const current = (answers[question.id] as string[]) || [];
     if (current.includes(option)) {
@@ -98,6 +88,7 @@ function App() {
     setShowExplanation(false);
     setUserName('');
     setNameEntered(false);
+    setShowExportMenu(false);
   };
 
   const getGrade = () => {
@@ -110,6 +101,119 @@ function App() {
 
   const getCorrectCount = () => {
     return questions.filter(q => isCorrect(q)).length;
+  };
+
+  const generateTxtReport = (): string => {
+    const grade = getGrade();
+    const percentage = Math.round((score / totalPoints) * 100);
+    const date = new Date().toLocaleString('ru-RU');
+    
+    let report = `═══════════════════════════════════════════
+  РЕЗУЛЬТАТЫ ТЕСТИРОВАНИЯ
+  Автоматизированные системы противопожарной
+  сигнализации (АСПС)
+═══════════════════════════════════════════
+
+Дата: ${date}
+Тестируемый: ${userName}
+
+───────────────────────────────────────────
+  ИТОГОВЫЙ РЕЗУЛЬТАТ
+───────────────────────────────────────────
+  Оценка: ${grade.grade}
+  Баллы: ${score} / ${totalPoints}
+  Процент: ${percentage}%
+  Правильных ответов: ${getCorrectCount()} из ${questions.length}
+───────────────────────────────────────────
+
+ДЕТАЛИЗАЦИЯ ОТВЕТОВ:
+
+`;
+
+    questions.forEach((q, idx) => {
+      const correct = isCorrect(q);
+      const userAnswer = answers[q.id];
+      
+      report += `${idx + 1}. [${correct ? '✓' : '✗'}] ${q.text}\n`;
+      
+      if (q.type === 'multiple') {
+        const userArr = Array.isArray(userAnswer) ? userAnswer : [];
+        report += `   Ваш ответ: ${userArr.length > 0 ? userArr.join('; ') : '—'}\n`;
+        report += `   Правильный: ${(q.correctAnswer as string[]).join('; ')}\n`;
+      } else {
+        report += `   Ваш ответ: ${userAnswer || '—'}\n`;
+        if (!correct) {
+          report += `   Правильный: ${q.correctAnswer as string}\n`;
+        }
+      }
+      
+      report += `   Пояснение: ${q.explanation}\n`;
+      if (q.reference) {
+        report += `   Источник: ${q.reference}\n`;
+      }
+      report += '\n';
+    });
+
+    report += `═══════════════════════════════════════════
+  Конец отчёта
+═══════════════════════════════════════════`;
+
+    return report;
+  };
+
+  const handleExportTxt = async () => {
+    const report = generateTxtReport();
+    const fileName = `АСПС_тест_${userName.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.txt`;
+
+    // Try Web Share API first (mobile)
+    if (navigator.share && navigator.canShare) {
+      const file = new File([report], fileName, { type: 'text/plain;charset=utf-8' });
+      const shareData = {
+        files: [file],
+        title: 'Результаты теста АСПС',
+        text: `Результаты тестирования по АСПС: ${userName} — ${score}/${totalPoints} баллов`
+      };
+      
+      try {
+        if (navigator.canShare(shareData)) {
+          await navigator.share(shareData);
+          setShowExportMenu(false);
+          return;
+        }
+      } catch (err) {
+        // User cancelled or share failed, fall through to download
+      }
+    }
+
+    // Fallback: download file
+    const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setShowExportMenu(false);
+  };
+
+  const handleCopyToClipboard = async () => {
+    const report = generateTxtReport();
+    try {
+      await navigator.clipboard.writeText(report);
+      alert('Результаты скопированы в буфер обмена!');
+    } catch {
+      // Fallback for older browsers
+      const textarea = document.createElement('textarea');
+      textarea.value = report;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      alert('Результаты скопированы в буфер обмена!');
+    }
+    setShowExportMenu(false);
   };
 
   const renderHome = () => (
@@ -133,7 +237,7 @@ function App() {
               ⭐ {totalPoints} баллов
             </span>
             <span className="bg-amber-50 text-amber-700 px-3 py-1.5 rounded-full text-xs font-medium">
-              ⏱ ~15 мин
+              ⏱ ~20 мин
             </span>
           </div>
         </div>
@@ -175,10 +279,10 @@ function App() {
             <div className="bg-gray-50 rounded-xl p-4 text-left text-sm text-gray-600 space-y-2">
               <p className="font-semibold text-gray-700">📋 Правила теста:</p>
               <ul className="space-y-1 text-xs">
+                <li>• Вопросы с одним ответом, множественным выбором, вводом текста и исключением</li>
                 <li>• Каждый вопрос имеет разную стоимость в баллах</li>
-                <li>• После ответа вы увидите объяснение</li>
-                <li>• Возврат к предыдущим вопросам невозможен</li>
-                <li>• Результат отображается после завершения</li>
+                <li>• После ответа вы увидите объяснение со ссылкой на нормативный документ</li>
+                <li>• По завершении можно экспортировать результаты в TXT</li>
               </ul>
             </div>
 
@@ -213,8 +317,19 @@ function App() {
     </div>
   );
 
+  const getTypeLabel = (type: string) => {
+    switch (type) {
+      case 'single': return { label: '🔘 Один ответ', className: 'bg-blue-50 text-blue-700' };
+      case 'multiple': return { label: '☑️ Несколько ответов', className: 'bg-purple-50 text-purple-700' };
+      case 'fill': return { label: '✏️ Введите ответ', className: 'bg-green-50 text-green-700' };
+      case 'exclude': return { label: '🚫 Исключите неправильный', className: 'bg-rose-50 text-rose-700' };
+      default: return { label: '', className: '' };
+    }
+  };
+
   const renderQuestion = () => {
     const progress = ((currentQuestion + 1) / questions.length) * 100;
+    const typeInfo = getTypeLabel(question.type);
     
     return (
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 flex flex-col">
@@ -248,14 +363,8 @@ function App() {
                 {currentQuestion + 1}
               </span>
               <div className="flex-1">
-                <span className={`inline-block text-xs px-2.5 py-1 rounded-full mb-2 font-medium ${
-                  question.type === 'single' ? 'bg-blue-50 text-blue-700' :
-                  question.type === 'multiple' ? 'bg-purple-50 text-purple-700' :
-                  'bg-green-50 text-green-700'
-                }`}>
-                  {question.type === 'single' && '🔘 Один ответ'}
-                  {question.type === 'multiple' && '☑️ Несколько ответов'}
-                  {question.type === 'fill' && '✏️ Введите ответ'}
+                <span className={`inline-block text-xs px-2.5 py-1 rounded-full mb-2 font-medium ${typeInfo.className}`}>
+                  {typeInfo.label}
                 </span>
                 <h2 className="text-base md:text-lg font-semibold text-gray-800 leading-relaxed">
                   {question.text}
@@ -270,13 +379,14 @@ function App() {
 
             {/* Answer Options */}
             <div className="space-y-2.5 mt-4">
-              {question.type === 'single' && question.options?.map((option, idx) => {
+              {(question.type === 'single' || question.type === 'exclude') && question.options?.map((option, idx) => {
                 const isSelected = answers[question.id] === option;
                 const isCorrectOption = option === question.correctAnswer;
+                const isExclude = question.type === 'exclude';
                 
                 let btnClass = 'border-gray-200 hover:border-red-300 hover:bg-red-50/50';
                 if (isSelected && !showExplanation) {
-                  btnClass = 'border-red-500 bg-red-50 ring-2 ring-red-200';
+                  btnClass = isExclude ? 'border-rose-500 bg-rose-50 ring-2 ring-rose-200' : 'border-red-500 bg-red-50 ring-2 ring-red-200';
                 } else if (showExplanation && isSelected) {
                   btnClass = isCorrectOption ? 'border-green-500 bg-green-50' : 'border-red-500 bg-red-50';
                 } else if (showExplanation && isCorrectOption) {
@@ -292,7 +402,7 @@ function App() {
                   >
                     <div className="flex items-center gap-3">
                       <span className={`flex-shrink-0 w-7 h-7 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-colors ${
-                        isSelected && !showExplanation ? 'border-red-500 bg-red-500 text-white' :
+                        isSelected && !showExplanation ? (isExclude ? 'border-rose-500 bg-rose-500 text-white' : 'border-red-500 bg-red-500 text-white') :
                         showExplanation && isSelected && isCorrectOption ? 'border-green-500 bg-green-500 text-white' :
                         showExplanation && isSelected && !isCorrectOption ? 'border-red-500 bg-red-500 text-white' :
                         showExplanation && isCorrectOption ? 'border-green-500 bg-green-100 text-green-700' :
@@ -386,7 +496,27 @@ function App() {
                     {isCorrect(question) ? 'Правильно! +' + question.points + ' баллов' : 'Неправильно'}
                   </p>
                 </div>
-                <p className="text-sm text-gray-700 leading-relaxed">{question.explanation}</p>
+                <p className="text-sm text-gray-700 leading-relaxed mb-3">{question.explanation}</p>
+                {question.reference && (
+                  <div className="flex items-start gap-2 bg-white/70 rounded-lg p-2.5 border border-gray-200/50">
+                    <span className="text-sm">📄</span>
+                    <div className="text-xs">
+                      <span className="text-gray-500">Источник: </span>
+                      {question.referenceUrl ? (
+                        <a 
+                          href={question.referenceUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:text-blue-800 underline font-medium break-all"
+                        >
+                          {question.reference}
+                        </a>
+                      ) : (
+                        <span className="text-gray-700 font-medium">{question.reference}</span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -453,7 +583,6 @@ function App() {
               {percentage}% правильных ответов
             </div>
             
-            {/* Progress bar */}
             <div className="w-full bg-white/50 rounded-full h-3 mt-4 overflow-hidden">
               <div 
                 className={`h-3 rounded-full transition-all duration-1000 ease-out ${
@@ -467,7 +596,7 @@ function App() {
           </div>
 
           {/* Statistics */}
-          <div className="grid grid-cols-3 gap-3 mb-6">
+          <div className="grid grid-cols-3 gap-3 mb-5">
             <div className="bg-green-50 rounded-xl p-3">
               <div className="text-xl font-bold text-green-600">{correctCount}</div>
               <div className="text-xs text-gray-600 mt-0.5">Верных</div>
@@ -480,6 +609,41 @@ function App() {
               <div className="text-xl font-bold text-blue-600">{percentage}%</div>
               <div className="text-xs text-gray-600 mt-0.5">Точность</div>
             </div>
+          </div>
+
+          {/* Export Section */}
+          <div className="relative mb-4">
+            <button
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              className="w-full bg-indigo-50 text-indigo-700 py-3 rounded-xl font-semibold hover:bg-indigo-100 transition-all active:scale-95 transform flex items-center justify-center gap-2"
+            >
+              <span>📤</span> Экспорт результатов
+            </button>
+            
+            {showExportMenu && (
+              <div className="absolute bottom-full left-0 right-0 mb-2 bg-white rounded-xl shadow-xl border border-gray-200 p-3 space-y-2 animate-fade-in z-20">
+                <button
+                  onClick={handleExportTxt}
+                  className="w-full text-left px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-3"
+                >
+                  <span className="text-xl">📥</span>
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">Скачать TXT файл</p>
+                    <p className="text-xs text-gray-500">На телефоне — поделиться файлом</p>
+                  </div>
+                </button>
+                <button
+                  onClick={handleCopyToClipboard}
+                  className="w-full text-left px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-3"
+                >
+                  <span className="text-xl">📋</span>
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">Копировать в буфер</p>
+                    <p className="text-xs text-gray-500">Скопировать текст результатов</p>
+                  </div>
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="space-y-3">
@@ -551,11 +715,41 @@ function App() {
                     <p className="text-xs text-gray-500 mt-2 italic bg-gray-50 p-2 rounded-lg">
                       {q.explanation}
                     </p>
+                    {q.reference && (
+                      <div className="mt-2 flex items-start gap-1.5">
+                        <span className="text-xs">📄</span>
+                        <span className="text-xs text-gray-500">
+                          {q.referenceUrl ? (
+                            <a href={q.referenceUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                              {q.reference}
+                            </a>
+                          ) : (
+                            q.reference
+                          )}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
             );
           })}
+
+          {/* Export in review too */}
+          <div className="bg-white rounded-xl shadow-sm p-4 space-y-2">
+            <button
+              onClick={handleExportTxt}
+              className="w-full bg-indigo-50 text-indigo-700 py-3 rounded-xl font-semibold hover:bg-indigo-100 transition-all active:scale-95 transform flex items-center justify-center gap-2"
+            >
+              <span>📥</span> Скачать результаты в TXT
+            </button>
+            <button
+              onClick={handleCopyToClipboard}
+              className="w-full bg-gray-50 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-100 transition-all active:scale-95 transform flex items-center justify-center gap-2"
+            >
+              <span>📋</span> Копировать в буфер обмена
+            </button>
+          </div>
 
           <button
             onClick={restartQuiz}
